@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: voboai
+    runtime: python
+    buildCommand: |
+      apt-get update
+      apt-get install -y libjpeg-dev zlib1g-dev libfreetype6-dev
+      pip install -r requirements.txt
+    startCommand: python main.py
