@@ -2,8 +2,12 @@ services:
   - type: web
     name: voboai
     runtime: python
-    buildCommand: |
-      apt-get update
-      apt-get install -y libjpeg-dev zlib1g-dev libfreetype6-dev
-      pip install -r requirements.txt
-    startCommand: python main.py
+    plan: free
+    pythonVersion: 3.11.7
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python main.py"
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
