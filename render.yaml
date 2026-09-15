@@ -3,7 +3,6 @@ services:
     name: voboai
     runtime: python
     plan: free
-    pythonVersion: 3.11.7
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python main.py"
     envVars:
@@ -11,3 +10,5 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      - key: PYTHON_VERSION
+        value: 3.11.7
