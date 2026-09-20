@@ -1,0 +1,6 @@
+discord.py
+openai
+playwright
+playwright-stealth
+python-dotenv
+asyncio
