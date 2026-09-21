@@ -2,5 +2,5 @@ discord.py
 openai
 playwright
 playwright-stealth
+flask
 python-dotenv
-asyncio
