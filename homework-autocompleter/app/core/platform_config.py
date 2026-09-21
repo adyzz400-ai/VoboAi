@@ -1,31 +1,19 @@
-# app/core/platform_config.py
-
 PLATFORM_CONFIG = {
-    "sparx_maths": {
-        "base_url": "https://sparxmaths.uk/login", # The main login page
-        "login_url": "https://sparxmaths.uk/login",
-        
-        # Login Selectors (The elements used to log in)
+    "sparx": {
+        "name": "Sparx Maths",
+        "base_url": "https://sparxmaths.uk/login",
         "login_selectors": {
-            "username_field": "#username",        # Change this to the real ID
-            "password_field": "#password",        # Change this to the real ID
-            "submit_button": "button[type='submit']", 
-            "dashboard_indicator": ".dashboard-loaded" # Element that confirms login
+            "school_field": "#school-name", # The School Name input
+            "username_field": "#username",
+            "password_field": "#password",
+            "submit_button": "button[type='submit']",
+            "dashboard_indicator": ".dashboard-loaded"
         },
-        
-        # Automation Selectors (The elements used during the task)
         "task_selectors": {
-            "question_container": ".question-text", # Where the math problem is
-            "answer_input": "#answer-input-box",    # Where the answer is typed
-            "submit_button": "#submit-btn",         # The button to click
-            "next_button": ".next-question-btn"     # The button to go to next question
+            "question_container": ".question-text",
+            "answer_input": "#answer-input",
+            "submit_button": "#submit-btn"
         },
-        
-        # Human-like behavior settings
-        "delays": {
-            "min_typing_delay": 1.5,
-            "max_typing_delay": 3.5,
-            "navigation_wait": 2.0
-        }
+        "delays": {"min": 1.5, "max": 3.5}
     }
 }
