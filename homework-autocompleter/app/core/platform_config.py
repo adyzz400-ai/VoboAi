@@ -1,19 +1,32 @@
+# app/core/platform_config.py
+
+# This is the most important file for the Browser Engine.
+# It tells the bot which HTML elements to interact with.
+
 PLATFORM_CONFIG = {
-    "sparx": {
-        "name": "Sparx Maths",
-        "base_url": "https://sparxmaths.uk/login",
-        "login_selectors": {
-            "school_field": "#school-name", # The School Name input
-            "username_field": "#username",
-            "password_field": "#password",
-            "submit_button": "button[type='submit']",
-            "dashboard_indicator": ".dashboard-loaded"
-        },
-        "task_selectors": {
-            "question_container": ".question-text",
-            "answer_input": "#answer-input",
-            "submit_button": "#submit-btn"
-        },
-        "delays": {"min": 1.5, "max": 3.5}
+    "Sparx Maths": {
+        "url": "https://sparxmaths.com/login",
+        "login_type": "search_and_select",
+        "selectors": {
+            "school_input": "#school-search", # The search box for the school
+            "next_button": ".btn-next",       # The 'Next' button
+            "username_input": "#username",    # The login username field
+            "password_input": "#password",    # The login password field
+            "submit_button": "#login-submit", # The final login button
+            "task_container": ".assignment-list", # The list of homework
+            "task_item": ".task-item"         # Individual homework items
+        }
+    },
+    "Educake": {
+        "url": "https://educake.com/login",
+        "login_type": "direct_login",
+        "selectors": {
+            "school_input": "#school-name",
+            "username_input": "#email",
+            "password_input": "#password",
+            "submit_button": "#login-btn",
+            "task_container": ".homework-list",
+            "task_item": ".homework-item"
+        }
     }
 }
