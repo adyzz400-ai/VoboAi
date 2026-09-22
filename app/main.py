@@ -71,8 +71,8 @@ class HomeworkBot(discord.Client):
 
     # --- COMMANDS ---
 
-    @discord.ext.commands.command()
-    async def setup(self, ctx):
+   @commands.command() # This is the correct, professional way
+async def setup(self, ctx):
         """Command to trigger the initial setup menu."""
         embed = UIEmbeds.get_status_embed(
             "System", 
