@@ -1,57 +1,52 @@
-import asyncio
+# app/main.py
 import os
+import asyncio
 import discord
 from dotenv import load_dotenv
-
-from core.ai_engine import AIEngine
-from core.browser_engine import BrowserEngine
-from core.platform_config import PLATFORM_CONFIG
-from ui.components import PlatformSelect
+from app.core.ai_engine import AdvancedAIEngine
+from app.core.browser_engine import BrowserEngine
+from app.ui.components import PlatformSelect # We will trigger the Modal from here
 
 load_dotenv()
 
-class VoboAI(discord.Client):
+class HomeworkBot(discord.Client):
     def __init__(self):
-        intents = discord.Intents.default()
-        intents.message_content = True
+        # Use all intents to allow the bot to read messages and manage members
+        intents = discord.Intents.all()
         super().__init__(intents=intents)
         
-        self.ai_engine = AIEngine()
-        self.browser_engine = BrowserEngine(self.ai_engine, PLATFORM_CONFIG)
-        self.automation_semaphore = asyncio.Semaphore(5) # The Queue Limit
+        # Initialize the Brain and the Hands
+        self.ai_engine = AdvancedAIEngine(os.getenv("OPENAI_API_KEY"))
+        self.browser_engine = BrowserEngine(self.ai_engine)
+
+    async def setup_hook(self):
+        """Called when the bot starts up."""
+        print(f"🚀 [System] {self.user} is online and ready!")
+        # This is where you would register slash commands
+
+    async def trigger_login_modal(self, interaction, platform):
+        """Helper to send the Modal to the user's screen."""
+        # This will call the Modal from your UI components
+        await interaction.client.trigger_modal(interaction, platform)
+
+    async def send_dm_progress(self, user_id, platform, progress):
+        """Sends the status updates to the user's DMs."""
+        try:
+            user = await self.fetch_user(user_id)
+            embed = discord.Embed(
+                title="📊 Progress Update",
+                description=f"**Platform:** `{platform}`\n**Task:** Question {progress} in progress...",
+                color=discord.Color.blue()
+            )
+            await user.send(embed=embed)
+        except Exception as e:
+            print(f"[Error] Could not send DM to {user_id}: {e}")
 
     async def on_ready(self):
-        print(f"--- [SYSTEM] {self.user} is Online! ---")
+        print(f"✅ [System] {self.user} is online and ready!")
 
-    async def handle_automation_request(self, platform_id, credentials, user):
-        """Handles the queue and runs the task."""
-        async with self.automation_semaphore:
-            print(f"[QUEUE] Task started for {user.name}")
-            result = await self.browser_engine.run_automation(platform_id, credentials)
-            
-            if result['status'] == 'success':
-                await user.send(f"✅ **Task Complete!**\n{result['report']}")
-            else:
-                await user.send(f"❌ **Task Failed!**\n`{result['message']}`")
-
-    async def on_message(self, message):
-        if message.author == self.user: return
-
-        # Command to trigger the platform selection
-        if message.content.startswith('!start'):
-            # For testing, we'll just trigger Sparx
-            await message.reply("Select your platform:")
-            view = discord.ui.View()
-            view.add_item(PlatformSelect("sparx", "Sparx Maths", self))
-            await message.channel.send("Choose a platform to begin:", view=view, ephemeral=True)
-
-        # AI Chat Logic
-        elif self.user.mentioned_in(message):
-            async with message.channel.typing():
-                prompt = message.content.replace(f'<@{self.user.id}>', '').strip()
-                response = await self.ai_engine.generate_response(prompt)
-                await message.reply(response if response else "Error connecting to AI.")
-
+# Start the bot
 if __name__ == "__main__":
-    bot = VoboAI()
-    bot.run(os.getenv('DISCORD_TOKEN'))
+    bot = HomeworkBot()
+    # In a real build, we would register slash commands here
+    bot.run(os.getenv("DISCORD_BOT_TOKEN"))
