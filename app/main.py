@@ -1,14 +1,13 @@
-import os
-import asyncio
 import discord
+from discord.ext import commands  # <--- THIS IS THE KEY LINE
+import asyncio
+import os
 from dotenv import load_dotenv
 
-# Import our custom modules
+# Import your other modules
 from app.core.ai_engine import AdvancedAIEngine
 from app.core.browser_engine import BrowserEngine
-from app.core.platform_config import PLATFORM_CONFIG
-from app.ui.components import LoginModal, PlatformSelect, MainMenuView
-from app.ui.embeds import UIEmbeds
+from app.ui.components import PlatformSelect 
 
 # Load environment variables
 load_dotenv()
