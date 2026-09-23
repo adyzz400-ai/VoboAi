@@ -23,3 +23,6 @@ COPY . .
 # We tell it to run main.py which is inside your app/ folder
 # The 'app.main' tells Python to look in the app package
 CMD ["python", "-m", "app.main"]
+
+# Add this to your Dockerfile
+ENV PYTHONPATH=/app
