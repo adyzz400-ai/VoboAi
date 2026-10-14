@@ -1,0 +1,11 @@
+{
+  "accent": "#00A8E1",
+  "geminiDefault": "gemini-3.5-flash-lite",
+  "waits": { "min": 4, "max": 12 },
+  "educakeLoginUrl": "https://my.educake.co.uk/student-login",
+  "educakeBaseUrl": "https://my.educake.co.uk",
+  "discordToken": null,
+  "geminiKey": null,
+  "supabaseUrl": null,
+  "supabaseKey": null
+}
