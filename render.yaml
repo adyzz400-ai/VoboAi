@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: vobo-ai
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: CHROME_PATH
+        value: /usr/bin/chromium
+      - key: NODE_ENV
+        value: production
+      - key: QUEUE_CONCURRENCY
+        value: "1"
