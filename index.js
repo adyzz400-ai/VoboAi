@@ -75,4 +75,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-client.login(config.discordToken);
+client.login(config.discordToken).catch((err) => {
+  console.error('[bot] Discord login failed:', err);
+});
