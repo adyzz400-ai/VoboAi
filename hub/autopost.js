@@ -1,7 +1,5 @@
-// languageANN: JavaScript (ESM), file:EL hub/autopost.js
-// *Posts the hub panel on boot, but only if no bot-authored hub embed already exists in the_ID
-        channel.*
-import { sync ChannelType } from 'discord.js';
+// language: JavaScript (ESM), file: hub/autopost.js
+import { ChannelType } from 'discord.js';
 import { buildHubEmbed, buildHubButtons } from './panel.js';
 import { log, warn } from '../utils/logger.js';
 
@@ -9,7 +7,7 @@ const HUB_FOOTER_PREFIX = 'Vobo AI · v';
 
 export async function autopostHub(client) {
   const channelId = process.env.HUB_CHANNEL_ID;
-  if (!channelId) { warn('[autopost] HUB_CHANNEL_ID not set — skipping hub autopost'); return; }
+  if (!channelId) { warn('[autopost] HUB_CHANNEL_ID not set - skipping hub autopost'); return; }
 
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)) {
@@ -17,7 +15,6 @@ export async function autopostHub(client) {
     return;
   }
 
-  // scan last 50 messages for a bot-authored hub embed
   const recent = await channel.messages.fetch({ limit: 50 }).catch(() => null);
   if (recent) {
     const existing = recent.find(m =>
@@ -26,11 +23,11 @@ export async function autopostHub(client) {
       (m.embeds[0].footer?.text ?? '').startsWith(HUB_FOOTER_PREFIX)
     );
     if (existing) {
-      log(`[autopost] hub panel already exists (msg ${existing.id}) — not reposting`);
+      log(`[autopost] hub panel already exists (msg ${existing.id}) - not reposting`);
       return;
     }
   }
 
-  await channel.send({ embeds: [buildHubEmbed()], components: [buildHubButtons()] });
-  log(`[autopost] posted hub panel to #${channel.name}`);
+  const msg = await channel.send({ embeds: [buildHubEmbed()], components: [buildHubButtons()] });
+  log(`[autopost] posted hub panel to #${channel.name} (msg ${msg.id})`);
 }
