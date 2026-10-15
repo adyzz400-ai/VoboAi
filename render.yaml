@@ -14,6 +14,8 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_KEY
         sync: false
+      - key: HUB_CHANNEL_ID
+        sync: false
       - key: CHROME_PATH
         value: /usr/bin/chromium
       - key: NODE_ENV
