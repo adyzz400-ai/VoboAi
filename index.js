@@ -1,4 +1,5 @@
 // language: JavaScript (ESM), file: index.js
+// *Entry point. Boots the HTTP healthcheck, Discord client, hub autopost, and interaction router.*
 import 'dotenv/config';
 import http from 'node:http';
 import { Client, GatewayIntentBits, Events, MessageFlags } from 'discord.js';
@@ -12,21 +13,26 @@ import { dispatch as dispatchButton, register } from './handlers/buttonRouter.js
 import { handleStartModal } from './handlers/startModalSubmit.js';
 import { buildHubEmbed, buildHubButtons } from './hub/panel.js';
 import { eduHandlers } from './platforms/educake/handlers.js';
+import { autopostHub } from './hub/autopost.js';
 
+// — Render healthcheck —
 const PORT = process.env.PORT || 10000;
 http.createServer((req, res) => {
   if (req.url === '/healthz') { res.writeHead(200); res.end('ok'); return; }
   res.writeHead(404); res.end();
 }).listen(PORT, () => log(`[http] listening on :${PORT}`));
 
+// — hub button routes —
 register('hub', async (interaction) => {
   const [, action] = interaction.customId.split(':');
   if (action === 'start')    return interaction.showModal(buildStartModal());
   if (action === 'settings') return interaction.showModal(buildHubSettingsModal());
   if (action === 'tutorial') return interaction.reply({ embeds: [buildTutorialEmbed()], flags: MessageFlags.Ephemeral });
   if (action === 'back')     return interaction.update({ embeds: [buildHubEmbed()], components: [buildHubButtons()] });
+  warn(`[hub] unhandled action ${action}`);
 });
 
+// — educake button/modal/select routes —
 register('edu', async (interaction) => {
   const handler = eduHandlers[interaction.customId];
   if (!handler) { warn(`[edu] no handler for ${interaction.customId}`); return; }
@@ -35,9 +41,11 @@ register('edu', async (interaction) => {
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-client.once(Events.ClientReady, (c) => {
+client.once(Events.ClientReady, async (c) => {
   log(`[bot] logged in as ${c.user.tag} · ${c.guilds.cache.size} guild(s)`);
   warn('[sessions] in-memory store — sessions drop on redeploy');
+  try { await autopostHub(c); }
+  catch (err) { error('[autopost] failed', err); }
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -75,6 +83,4 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-client.login(config.discordToken).catch((err) => {
-  console.error('[bot] Discord login failed:', err);
-});
+client.login(config.discordToken);
