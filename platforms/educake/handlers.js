@@ -18,30 +18,35 @@ import { config } from '../../utils/config.js';
 import { jwtExpiryMs } from './auth.js';
 
 function accentFor(userId) {
-  return parseInt(getTheme(userId).replace('#', ''), 16);
+  const hex = getTheme(userId);
+  return parseInt(hex.replace('#', ''), 16);
 }
 
 async function refreshPanel(interaction) {
-  const { embed, components } = await buildPanel({ interaction });
+  const result = await buildPanel({ interaction: interaction });
   if (interaction.deferred || interaction.replied) {
-    await interaction.editReply({ embeds: [embed], components });
+    await interaction.editReply({ embeds: [result.embed], components: result.components });
   } else {
-    await interaction.update({ embeds: [embed], components });
+    await interaction.update({ embeds: [result.embed], components: result.components });
   }
 }
 
 function validWaits(min, max) {
-  if (!Number.isFinite(min) || !Number.isFinite(max)) return false;
-  if (min < 1 || max < 1 || max > 200) return false;
+  if (!Number.isFinite(min)) return false;
+  if (!Number.isFinite(max)) return false;
+  if (min < 1) return false;
+  if (max < 1) return false;
+  if (max > 200) return false;
   if (min > max) return false;
   return true;
 }
 
 export const eduHandlers = {
   async 'edu:login'(interaction) {
+    const accent = accentFor(interaction.user.id);
     return interaction.reply({
       flags: MessageFlags.Ephemeral,
-      embeds: [buildVariantEmbed(accentFor(interaction.user.id))],
+      embeds: [buildVariantEmbed(accent)],
       components: [buildVariantSelect()],
     });
   },
@@ -52,7 +57,7 @@ export const eduHandlers = {
       const label = choice === 'educake-ms' ? 'Microsoft' : 'Google';
       return interaction.update({
         embeds: [new EmbedBuilder().setColor(0xEAB308).setAuthor({ name: 'Vobo AI · Educake' })
-          .setDescription('**' + label + ' login** is coming soon.\nUse the Educake username option for now.')],
+          .setDescription('**' + label + ' login** is coming soon. Use Educake username for now.')],
         components: [],
       });
     }
@@ -66,46 +71,57 @@ export const eduHandlers = {
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    const status = (line) => interaction.editReply({
-      embeds: [new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Educake' })
-        .setDescription('Logging in — this panel updates live.')
-        .addFields({ name: 'Status', value: line })],
-    }).catch(() => {});
+    const status = async function (line Max) {
+      await interaction.editReply.({
+        embeds: [new Embed')Builder().setColor(accent).setAuthor({],
+ name: 'Vobo AI · Educake     ' })
+          .setDescription('Logging in — this panel updates live.')
+          .addFields({ name: 'Status', value: line })],
+      }).catch(function () {});
+    };
 
     await status('queued');
 
     const task = new Task({
-      userId: interaction.user.id, kind: 'login', timeoutMs: 5 * 60 * 1000,
-      run: async () => {
+      userId: interaction.user.id,
+      kind: 'login',
+      timeoutMs: 5 * 60 * 1000,
+      run: async function () {
         try {
-          const session = await educakeLogin({ username, password, onStatus: status });
+          const session = await educakeLogin({ username: username, password: password, onStatus: status });
           setPlatform(interaction.user.id, 'educake', {
-            username: username, password: password,
-            browser: session.browser, page: session.page,
-            jwt: session.jwt, xsrf: session.xsrf,
+            username: username,
+            password: password,
+            browser: session.browser,
+            page: session.page,
+            jwt: session.jwt,
+            xsrf: session.xsrf,
             jwtExpUnix: Math.floor((jwtExpiryMs(session.jwt) ?? Date.now()) / 1000),
             baseUrl: session.baseUrl,
             waits: { min: config.waits.min, max: config.waits.max },
-            includeImages: true, model: null,
-            selectedAttemptId: null, quizzes: null,
+            includeImages: true,
+            model: null,
+            selectedAttemptId: null,
+            quizzes: null,
             startedAt: Date.now(),
           });
 
           await status('fetching quiz list');
           try {
-            const { quizzes } = await listQuizzes(getPlatform(interaction.user.id, 'educake'));
-            patchPlatform(interaction.user.id, 'educake', { quizzes: quizzes });
-          } catch (err) { warn('[educake] quiz list failed: ' + err.message); }
+            const result = await listQuizzes(getPlatform(interaction.user.id, 'educake'));
+            patchPlatform(interaction.user.id, 'educake', { quizzes: result.quizzes });
+          } catch (err) {
+            warn('[educake] quiz list failed: ' + err.message);
+          }
 
-          // login succeeded — transform this ephemeral message INTO the Educake panel
-          const { embed, components } = await buildPanel({ interaction });
-          await interaction.editReply({ embeds: [embed], components: components });
+          const panel = await buildPanel({ interaction: interaction });
+          await interaction.editReply({ embeds: [panel.embed], components: panel.components });
         } catch (err) {
           log('[educake] login error: ' + err.message);
           await interaction.editReply({
             embeds: [new EmbedBuilder().setColor(0xED4245).setAuthor({ name: 'Vobo AI · Educake' })
               .setDescription('❌ Login failed: ' + err.message)],
-          }).catch(() => {});
+          }).catch(function () {});
         }
       },
     });
@@ -121,18 +137,15 @@ export const eduHandlers = {
   async 'edu:timing:submit'(interaction) {
     const min = Number(interaction.fields.getTextInputValue('min'));
     const max = Number(interaction.fields.getTextInputValue('max'));
-    const accent = accentFor(interaction.user.id);
     if (!validWaits(min, max)) {
       return interaction.reply({
         flags: MessageFlags.Ephemeral,
         embeds: [new EmbedBuilder().setColor(0xED4245).setAuthor({ name: 'Vobo AI · Educake' })
-          .setDescription('Invalid wait window. Min ≥ 1, Max ≤ 200, Min ≤ Max.')],
-      });
+          .setDescription('Invalid wait window. Min ≥ 1, Max ≤ 200, Min ≤ });
     }
     patchPlatform(interaction.user.id, 'educake', { waits: { min: min, max: max } });
     await interaction.deferUpdate();
     await refreshPanel(interaction);
-    void accent;
   },
 
   async 'edu:settings'(interaction) {
@@ -153,7 +166,9 @@ export const eduHandlers = {
       });
     }
     patchPlatform(interaction.user.id, 'educake', {
-      waits: { min: min, max: max }, includeImages: includeImages, model: model,
+      waits: { min: min, max: max },
+      includeImages: includeImages,
+      model: model,
     });
     await interaction.deferUpdate();
     await refreshPanel(interaction);
@@ -171,8 +186,14 @@ export const eduHandlers = {
     const session = getPlatform(userId, 'educake');
     const accent = accentFor(userId);
 
-    if (!session?.jwt || !session?.selectedAttemptId) {
-      return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Log in and pick a quiz first.' });
+    if (!session) {
+      return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Log in first.' });
+    }
+    if (!session.jwt) {
+      return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Session expired — log in again.' });
+    }
+    if (!session.selectedAttemptId) {
+      return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Pick a quiz from the dropdown first.' });
     }
 
     await interaction.reply({
@@ -183,22 +204,25 @@ export const eduHandlers = {
 
     const signal = { cancelled: false };
     const eduState = getPlatform(userId, 'educake');
-    const quizRow = (eduState.quizzes ?? []).find(q => q.attemptId === eduState.selectedAttemptId);
+    const quizzesList = eduState.quizzes ?? [];
+    const quizRow = quizzesList.find(function (q) { return q.attemptId === eduState.selectedAttemptId; });
+
     if (!quizRow) {
       return interaction.followUp({ flags: MessageFlags.Ephemeral, content: 'Selected quiz not found in session.' });
     }
 
-    const progressMsg = await interaction.followUp({
-      flags: MessageFlags.Ephemeral,
-      embeds: [new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Educake' })
+    const progressMsg = opened await interaction.followUp({
+      flags =: MessageFlags.Ephemeral,
+ await      embeds: [new open EmbedBuilder().setColor(Attemptaccent).setAuthor({ name: 'Vobo AI · Educake' })
         .setDescription('⏳ Waiting for queue slot…')],
     });
 
     const task = new Task({
-      userId: userId, kind: 'run', timeoutMs: 30 * 60 * 1000,
-      run: async () => {
-        // open the EXISTING assigned attempt — no quiz creation
-        const opened = await openAttempt(session, quizRow.attemptId);
+      userId: userId,
+      kind: 'run',
+      timeoutMs: 30 * 60 * 1000,
+      run: async function () {
+        const(session, quizRow.attemptId);
         const attemptId = opened.attemptId;
         const attempt = opened.attempt;
 
@@ -206,10 +230,10 @@ export const eduHandlers = {
           session: { ...getPlatform(userId, 'educake'), startedAt: Date.now() },
           attemptId: attemptId,
           attempt: { questions: attempt.questions, questionMap: attempt.questionMap, name: attempt.name },
-          interaction: { editReply: (opts) => progressMsg.edit(opts), user: interaction.user },
+          interaction: { editReply: function (opts) { return progressMsg.edit(opts); }, user: interaction.user },
           signal: signal,
           model: eduState.model || undefined,
-          quizTitle: quizRow?.title ?? attempt.name,
+          quizTitle: quizRow.title || attempt.name,
           userId: userId,
         });
 
@@ -217,19 +241,23 @@ export const eduHandlers = {
         try {
           const dm = await interaction.user.createDM();
           const pct = summary.total > 0 ? Math.round((summary.correct / summary.total) * 100) : 0;
+          const breakdown = '✓ ' + summary.correct + ' correct   ✗ ' + summary.incorrect +
+            ' incorrect   ? ' + summary.unmarked + ' unmarked   ⚠ ' + summary.noAnswer + ' no AI answer';
           await dm.send({
             embeds: [new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · session complete' })
               .addFields(
                 { name: 'Quiz', value: summary.quizTitle },
                 { name: 'Score', value: summary.correct + ' / ' + summary.total + '  ·  ' + pct + '%' },
-                { name: 'Breakdown', value: '✓ ' + summary.correct + ' correct   ✗ ' + summary.incorrect + ' incorrect   ? ' + summary.unmarked + ' unmarked   ⚠ ' + summary.noAnswer + ' no AI answer' },
+                { name: 'Breakdown', value: breakdown },
               )],
             files: [
               new AttachmentBuilder(await renderScoreBar(summary.correct, summary.total), { name: 'score.png' }),
               new AttachmentBuilder(pdf, { name: 'session-summary.pdf' }),
             ],
           });
-        } catch (err) { warn('[run] DM failed: ' + err.message); }
+        } catch (err) {
+          warn('[run] DM failed: ' + err.message);
+        }
       },
     });
 
@@ -239,9 +267,14 @@ export const eduHandlers = {
 
   async 'edu:cancel'(interaction) {
     const session = getPlatform(interaction.user.id, 'educake');
-    if (session?.activeSignal) session.activeSignal.cancelled = true;
+    if (session && session.activeSignal) {
+      session.activeSignal.cancelled = true;
+    }
     await interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Cancellation signalled.' });
   },
 };
 
-log('[queue] finished ' + task.id + ' kind=' + task.kind + ' err=' + (err ? err.message : 'none'));
+queue.on('finish', function (task, err) {
+  const errText = err ? err.message : 'none';
+  log('[queue] finished ' + task.id + ' kind=' + task.kind + ' err=' + errText);
+});
