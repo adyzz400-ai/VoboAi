@@ -1,9 +1,7 @@
 // language: JavaScript (ESM), file: platforms/educake/getAIanswer.js
-// *One call to Gemini per question. Text-first; image URL is passed through if present.*
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import axios from 'axios';
 import { config } from '../../utils/config.js';
-import { log } from '../../utils/logger.js';
+import { log, warn } from '../../utils/logger.js';
 
 let genAI = null;
 function client() {
@@ -13,6 +11,9 @@ function client() {
   }
   return genAI;
 }
+
+// Primary model + fallbacks, tried in order on overload.
+const MODEL_CHAIN = ['gemini-3.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash'];
 
 const SYSTEM_RULE = (q) => {
   if (q.kind === 'multiple_choice') {
@@ -25,7 +26,6 @@ const SYSTEM_RULE = (q) => {
 };
 
 async function fetchImageAsInline(url, session) {
-  // Same-origin images need the browser's cookies; call from inside the page.
   try {
     const b64 = await session.page.evaluate(async (u) => {
       const res = await fetch(u, { credentials: 'include' });
@@ -45,8 +45,16 @@ async function fetchImageAsInline(url, session) {
   }
 }
 
-export async function getAIanswer(q, session, { model = config.geminiDefault } = {}) {
+async function callOnce(model, parts) {
   const m = client().getGenerativeModel({ model });
+  const res = await m.generateContent({ contents: [{ role: 'user', parts }] });
+  return (res.response.text() ?? '').trim();
+}
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+export async function getAIanswer(q, session, { model = config.geminiDefault } = {}) {
+  const chain = [model, ...MODEL_CHAIN.filter(m => m !== model)];
   const parts = [{ text: `${SYSTEM_RULE(q)}\n\nQuestion:\n${q.prompt}` }];
 
   if (q.image) {
@@ -54,11 +62,23 @@ export async function getAIanswer(q, session, { model = config.geminiDefault } =
     if (inline) parts.push(inline);
   }
 
-  const res = await m.generateContent({ contents: [{ role: 'user', parts }] });
-  const text = res.response.text()?.trim() ?? '';
+  for (let i = 0; i < chain.length; i++) {
+    const m = chain[i];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const raw = await callOnce(m, parts);
+        const text = raw.replace(/^["'`]+|["'`]+$/g, '').trim();
+        if (text) return { answer: text, model: m };
+      } catch (err) {
+        const status = err?.status ?? err?.response?.status;
+        const is503 = /503|overload|high demand/i.test(err.message || '');
+        warn(`[gemini] ${m} attempt ${attempt + 1} failed (${status ?? '?'}): ${err.message.slice(0, 120)}`);
+        if (is503 || status === 429) { await sleep(600 * (attempt + 1)); continue; }
+        break; // non-retryable for this model — move to next in chain
+      }
+    }
+  }
 
-  // strip a wrapping pair of quotes if the model added any
-  return text.replace(/^["'`]+|["'`]+$/g, '').trim();
+  warn('[gemini] all models failed — returning null answer');
+  return { answer: null, model: null };
 }
-
-void axios; // reserved for future non-page transport
