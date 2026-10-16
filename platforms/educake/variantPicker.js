@@ -1,8 +1,5 @@
 // language: JavaScript (ESM), file: platforms/educake/variantPicker.js
 import { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } from 'discord.js';
-import { config } from '../../utils/config.js';
-
-const ACCENT = parseInt(config.accent.replace('#', ''), 16);
 
 const EMOJI = {
   educake:   { id: '1560718324600668200', name: 'educake' },
@@ -10,9 +7,10 @@ const EMOJI = {
   microsoft: { id: '1560718420431872050', name: 'microsoft' },
 };
 
-export function buildVariantEmbed() {
+export function buildVariantEmbed(accent) {
+  const color = accent ?? 0x00A8E1;
   return new EmbedBuilder()
-    .setColor(ACCENT)
+    .setColor(color)
     .setAuthor({ name: 'Vobo AI · Educake' })
     .setTitle('Choose your sign-in method')
     .setDescription(
