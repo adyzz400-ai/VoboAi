@@ -3,9 +3,12 @@ import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'disc
 import { config } from '../utils/config.js';
 import { PLATFORMS } from '../platforms/index.js';
 
-const ACCENT = parseInt(config.accent.replace('#', ''), 16);
+const parseHex = (hex) => parseInt(hex.replace('#', ''), 16);
 
-export function buildHubEmbed() {
+// themeHex is optional — if omitted, the caller's per-user theme (or config default) is used
+export function buildHubEmbed(themeHex) {
+  const hex = themeHex ?? config.accent;
+
   const supported = Object.values(PLATFORMS).map(p => {
     const variants = p.available
       ? p.loginVariants.filter(v => v.available).map(v => v.label.replace(`${p.name} `, '')).join(' · ')
@@ -14,11 +17,10 @@ export function buildHubEmbed() {
   }).join('\n');
 
   return new EmbedBuilder()
-    .setColor(ACCENT)
+    .setColor(parseHex(hex))
     .setAuthor({ name: 'Vobo AI', iconURL: 'https://cdn.discordapp.com/embed/avatars/0.png' })
     .setTitle('🎓 Homework on autopilot')
-    .setDescription(
-      '**Vobo AI** is your personal homework assistant. It signs in to your school platforms, reads the questions, ' +
+    .setVobo AI** is your personal homework assistant. It signs in to your school platforms, reads the questions, ' +
       'answers them, and hands you a clean PDF of the whole session when it\'s done — so you can focus on actually ' +
       'understanding the work instead of grinding through 40 questions at midnight.\n\n' +
       '🔐 **Your credentials never touch the chat.** Every login goes straight into a headless browser that lives ' +
