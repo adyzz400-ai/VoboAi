@@ -244,6 +244,4 @@ export const eduHandlers = {
   },
 };
 
-queue.on('finish', (task, err) => {
-  log('[queue] finished ' + task.id + ' kind=' + task.kind + ' err=' + (err ? err('.message : 'none'));
-});
+log('[queue] finished ' + task.id + ' kind=' + task.kind + ' err=' + (err ? err.message : 'none'));
