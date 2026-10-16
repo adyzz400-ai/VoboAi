@@ -7,13 +7,14 @@ import { config } from './utils/config.js';
 import { log, warn, error } from './utils/logger.js';
 import * as startCmd from './commands/start.js';
 import { buildStartModal } from './hub/startModal.js';
-import { buildHubSettingsModal, parseHubSettings } from './hub/settingsModal.js';
+import { buildHubSettingsModal, parseHubSettings, buildThemeEmbed, buildThemeSelect } from './hub/settingsModal.js';
 import { buildTutorialEmbed } from './hub/tutorial.js';
 import { dispatch as dispatchButton, register } from './handlers/buttonRouter.js';
 import { handleStartModal } from './handlers/startModalSubmit.js';
 import { buildHubEmbed, buildHubButtons } from './hub/panel.js';
 import { eduHandlers } from './platforms/educake/handlers.js';
 import { autopostHub } from './hub/autopost.js';
+import { getTheme, setTheme } from './hub/sessionStore.js';
 
 // Render healthcheck
 const PORT = process.env.PORT || 10000;
@@ -29,14 +30,17 @@ register('hub', async (interaction) => {
   if (action === 'start')    return interaction.showModal(buildStartModal());
   if (action === 'settings') return interaction.showModal(buildHubSettingsModal());
   if (action === 'tutorial') return interaction.reply({ embeds: [buildTutorialEmbed()], flags: MessageFlags.Ephemeral });
-  if (action === 'back')     return interaction.update({ embeds: [buildHubEmbed()], components: [buildHubButtons()] });
+  if (action === 'back') {
+    const hex = getTheme(interaction.user.id);
+    return interaction.update({ embeds: [buildHubEmbed(hex)], components: [buildHubButtons()] });
+  }
 
   if (action === 'theme') {
-    const { buildThemeEmbed, buildThemeSelect } = await import('./hub/settingsModal.js');
+    const current = getTheme(interaction.user.id);
     return interaction.reply({
       flags: MessageFlags.Ephemeral,
-      embeds: [buildThemeEmbed()],
-      components: [buildThemeSelect()],
+      embeds: [buildThemeEmbed(current)],
+      components: [buildThemeSelect(current)],
     });
   }
 
@@ -74,7 +78,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         return interaction.reply({
           flags: MessageFlags.Ephemeral,
           embeds: [{
-            color: parseInt(parsed.accent?.replace('#', '') ?? config.accent.replace('#', ''), 16),
+            color: parseInt(config.accent.replace('#', ''), 16),
             author: { name: 'Vobo AI' },
             description: 'Settings saved.',
           }],
@@ -92,9 +96,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       if (interaction.customId === 'hub:theme:pick') {
         const hex = interaction.values[0];
-        const { buildThemeEmbed } = await import('./hub/settingsModal.js');
+        setTheme(interaction.user.id, hex);
+        log(`[theme] ${interaction.user.id} -> ${hex}`);
+
+        // update the ephemeral picker in place
         await interaction.update({ embeds: [buildThemeEmbed(hex)], components: [] });
-        log(`[theme] ${interaction.user.id} -> #${hex}`);
+
+        // if the source message is the hub panel, refresh its colour live
+        try {
+          const freshHex = getTheme(interaction.user.id);
+          await interaction.message.edit({
+            embeds: [buildHubEmbed(freshHex)],
+            components: [buildHubButtons()],
+          }).catch(() => {});
+        } catch { /* interaction.message may not be the hub panel */ }
         return;
       }
 
