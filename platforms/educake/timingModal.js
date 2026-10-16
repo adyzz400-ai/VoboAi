@@ -4,11 +4,11 @@ import { config } from '../../utils/config.js';
 
 export function buildTimingModal(session) {
   const min = new TextInputBuilder()
-    .setCustomId('min').setLabel('Min wait (seconds)')
+    .setCustomId('min').setLabel('Min wait (seconds, 1–200)')
     .setPlaceholder('4').setStyle(TextInputStyle.Short).setRequired(true)
     .setValue(String(session?.waits?.min ?? config.waits.min));
   const max = new TextInputBuilder()
-    .setCustomId('max').setLabel('Max wait (seconds)')
+    .setCustomId('max').setLabel('Max wait (seconds, 1–200)')
     .setPlaceholder('12').setStyle(TextInputStyle.Short).setRequired(true)
     .setValue(String(session?.waits?.max ?? config.waits.max));
   return new ModalBuilder()
