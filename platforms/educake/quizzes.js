@@ -1,18 +1,23 @@
 // language: JavaScript (ESM), file: platforms/educake/quizzes.js
-// *The four real calls: list, start, answer, finish. All shapes taken from captured traffic.*
 import { EducakeClient } from './client.js';
 
-// Dashboard list — GET /api/student/quiz
-// Query params reflect the dashboard's filters. limit bumped to pull everything.
-export async function listQuizzes(session, { type = 'teacher', limit = 50, completed = 0, excludeRetakes = 1, includeArchived = 0 } = {}) {
+export async function listQuizzes(session, opts = {}) {
+  const type = opts.type || 'teacher';
+  const limit = opts.limit || 50;
+  const completed = opts.completed || 0;
+  const excludeRetakes = opts.excludeRetakes === undefined ? 1 : opts.excludeRetakes;
+  const includeArchived = opts.includeArchived || 0;
+
   const client = new EducakeClient(session.page, session);
   const qs = new URLSearchParams({
-    type, subject: '0', completed: String(completed),
+    type: type,
+    subject: '0',
+    completed: String(completed),
     excludeRetakes: String(excludeRetakes),
     limit: String(limit),
     includeArchived: String(includeArchived),
   }).toString();
-  const raw = await client.get(`/api/student/quiz?${qs}`);
+  const raw = await client.get('/api/student/quiz?' + qs);
   const attempts = raw?.attempts ?? {};
   return {
     total: raw?.total ?? Object.keys(attempts).length,
@@ -27,12 +32,12 @@ function normalizeQuiz(a) {
     title: a.name,
     subject: a.displaySubject,
     course: a.course,
-    dueDate: a.dueDate,               // "YYYY-MM-DD" or null
+    dueDate: a.dueDate,
     startDate: a.startDate,
     questionCount: a.questionCount,
     answerCount: a.answerCount,
     correctCount: a.correctCount,
-    status: a.status,                 // "new" | "in_progress" | "completed"
+    status: a.status,
     overdue: a.overdue,
     isRetake: a.isRetake,
     isArchived: a.isArchived,
@@ -41,45 +46,36 @@ function normalizeQuiz(a) {
   };
 }
 
-// Start an attempt — POST /api/student/quiz with the same "create" body.
-// For an assigned (teacher) quiz, use the assessmentId from the dashboard.
-export async function startQuiz(session, assessmentId) {
+// Assigned-quiz opener — GET /api/student/quiz/{attemptId}
+// Returns the existing attempt with its full question set. No quiz creation.
+export async function openAttempt(session, attemptId) {
   const client = new EducakeClient(session.page, session);
-  const raw = await client.post('/api/student/quiz', {
-    courseId: 1,
-    courses: [1],
-    assessmentId,
-    modules: null,
-    units: null,
-    topics: null,
-    numberOfQuestions: null,
-    includeHigherTier: false,
-    excludeCorrect: true,
-  });
+  const raw = await client.get('/api/student/quiz/' + attemptId);
   const attempts = raw?.attempt ?? {};
   const attemptIdStr = Object.keys(attempts)[0];
-  if (!attemptIdStr) throw new Error('startQuiz: no attempt returned');
+  if (!attemptIdStr) throw new Error('openAttempt: no attempt returned for id ' + attemptId);
   const attempt = attempts[attemptIdStr];
-  return { attemptId: Number(attemptIdStr), attempt };
+  return { attemptId: Number(attemptIdStr), attempt: attempt };
 }
 
 // Answer — POST /api/attempt/{attemptId}/quiztion/{testQuestionId}/variant/{variantId}/answer
-export async function submitAnswer(session, { attemptId, testQuestionId, variantId, givenAnswer }) {
+export async function submitAnswer(session, args) {
   const client = new EducakeClient(session.page, session);
-  const url = `/api/attempt/${attemptId}/quiztion/${testQuestionId}/variant/${variantId}/answer`;
-  const raw = await client.post(url, { givenAnswer });
+  const url = '/api/attempt/' + args.attemptId +
+    '/quiztion/' + args.testQuestionId +
+    '/variant/' + args.variantId +
+    '/answer';
+  const raw = await client.post(url, { givenAnswer: args.givenAnswer });
   return raw?.answer ?? null;
 }
 
-// Finish — best-effort guess from URL pattern; falls back to leaving the attempt complete.
-// If Educake exposes a different endpoint, this throws and the run reports what it saw.
+// Finish — best-effort; Educake may auto-finish when the last question is answered.
 export async function finishQuiz(session, attemptId) {
   const client = new EducakeClient(session.page, session);
   try {
-    const raw = await client.post(`/api/attempt/${attemptId}/finish`, {});
+    const raw = await client.post('/api/attempt/' + attemptId + '/finish', {});
     return raw ?? { finished: true };
   } catch (err) {
-    // fall through — some attempts auto-finish when the last question is answered
-    return { finished: false, note: `finish endpoint returned ${err.status ?? '?'}` };
+    return { finished: false, note: 'finish endpoint returned ' + (err.status ?? '?') };
   }
 }
