@@ -10,7 +10,6 @@ const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15
 
 const USERNAME_SELECTORS = ['input[name="username"]', 'input[type="email"]', 'input[name="email"]', 'input#username'];
 const PASSWORD_SELECTORS = ['input[name="password"]', 'input[type="password"]'];
-const SUBMIT_SELECTORS   = ['button[type="submit"]', 'input[type="submit"]', 'button.login'];
 
 async function firstMatch(page, selectors) {
   for (const sel of selectors) {
@@ -20,11 +19,50 @@ async function firstMatch(page, selectors) {
   return null;
 }
 
+async function dismissCookieBanner(page) {
+  const clicked = await page.evaluate(() => {
+    const texts = ['Yes, allow all', 'Allow all', 'Allow selection', 'Accept all', 'Accept'];
+    const buttons = Array.from(document.querySelectorAll('button, a, div[role="button"]'));
+    for (const t of texts) {
+      const b = buttons.find(el => (el.textContent || '').trim().toLowerCase() === t.toLowerCase());
+      if (b) { b.click(); return t; }
+    }
+    return null;
+  });
+  if (clicked) {
+    log(`[login] dismissed cookie banner via "${clicked}"`);
+    await new Promise(r => setTimeout(r, 800));
+  } else {
+    log('[login] no cookie banner button found (may already be dismissed)');
+  }
+}
+
+async function clickSubmit(page) {
+  const clicked = await page.evaluate(() => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const candidates = Array.from(document.querySelectorAll('button, input[type="submit"], a[role="button"]'))
+      .filter(isVisible);
+    // prefer buttons with log in / sign in text
+    const preferred = candidates.find(el => /log\s*in|sign\s*in/i.test((el.textContent || el.value || '').trim()));
+    if (preferred) { preferred.click(); return (preferred.textContent || preferred.value || 'submit').trim(); }
+    // fall back to any visible submit-typed control
+    const typed = candidates.find(el => el.type === 'submit');
+    if (typed) { typed.click(); return 'input[type=submit]'; }
+    // fall back to the first visible button on the page
+    if (candidates[0]) { candidates[0].click(); return 'first-visible-button'; }
+    return null;
+  });
+  if (!clicked) throw new Error('No clickable submit control found');
+  return clicked;
+}
+
 async function grabJwtFromPage(page) {
   return page.evaluate(() => {
     const isJwt = (v) => typeof v === 'string' && /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(v);
 
-    // 1. localStorage + sessionStorage
     const scanStore = (store) => {
       for (let i = 0; i < store.length; i++) {
         const k = store.key(i);
@@ -43,14 +81,13 @@ async function grabJwtFromPage(page) {
           };
           const deep = walk(parsed);
           if (deep) return { source: `storage:${k}`, jwt: deep };
-        } catch { /* not JSON */ }
+        } catch {}
       }
       return null;
     };
     const ls = scanStore(localStorage); if (ls) return ls;
     const ss = scanStore(sessionStorage); if (ss) return ss;
 
-    // 2. window globals
     for (const k of Object.keys(window)) {
       try {
         const v = window[k];
@@ -60,16 +97,14 @@ async function grabJwtFromPage(page) {
             if (isJwt(sv)) return { source: `window.${k}.${sk}`, jwt: sv };
           }
         }
-      } catch { /* cross-origin window prop */ }
+      } catch {}
     }
 
-    // 3. meta tags
     for (const m of document.querySelectorAll('meta')) {
       const c = m.getAttribute('content');
       if (isJwt(c)) return { source: `meta:${m.getAttribute('name') || m.getAttribute('property')}`, jwt: c };
     }
 
-    // 4. script tag contents
     for (const s of document.querySelectorAll('script:not([src])')) {
       const txt = s.textContent || '';
       const match = txt.match(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/);
@@ -80,12 +115,12 @@ async function grabJwtFromPage(page) {
   });
 }
 
-async function waitForJwt(page, timeoutMs = 15_000) {
+async function waitForJwt(page, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const found = await grabJwtFromPage(page);
     if (found) return found;
-    await new Promise(r => setTimeout(r, 300));
+    await new Promise(r => setTimeout(r, 400));
   }
   return null;
 }
@@ -109,12 +144,16 @@ export async function educakeLogin({ username, password, onStatus = () => {} }) 
   try {
     page = await browser.newPage();
     await page.setUserAgent(UA);
-    page.on('console', m => log(`[page ${m.type()}] ${m.text()}`));
-    page.on('pageerror', e => log(`[pageerror] ${e.message}`));
+    await page.setViewport({ width: 1280, height: 900 });
+    page.on('console', m => log(`[page ${m.type()}] ${m.text().slice(0, 300)}`));
+    page.on('pageerror', e => log(`[pageerror] ${e.message.slice(0, 300)}`));
 
     step(`navigating to ${config.educakeLoginUrl}`);
     await page.goto(config.educakeLoginUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     log(`[login] landed on ${page.url()} · title "${await page.title()}"`);
+
+    step('dismissing cookie banner');
+    await dismissCookieBanner(page);
 
     const inputs = await page.evaluate(() =>
       Array.from(document.querySelectorAll('input')).map(i => ({
@@ -126,55 +165,48 @@ export async function educakeLogin({ username, password, onStatus = () => {} }) 
     step('filling username');
     const u = await firstMatch(page, USERNAME_SELECTORS);
     if (!u) throw new Error(`Username field not found. Inputs seen: ${JSON.stringify(inputs)}`);
-    await u.type(username, { delay: 25 });
+    await u.click({ clickCount: 3 });
+    await u.type(username, { delay: 30 });
 
     step('filling password');
     const p = await firstMatch(page, PASSWORD_SELECTORS);
     if (!p) throw new Error('Password field not found.');
-    await p.type(password, { delay: 25 });
+    await p.click({ clickCount: 3 });
+    await p.type(password, { delay: 30 });
+
+    const urlBefore = page.url();
 
     step('submitting form');
-    const s = await firstMatch(page, SUBMIT_SELECTORS);
-    if (!s) {
-      const buttons = await page.evaluate(() =>
-        Array.from(document.querySelectorAll('button, input[type="submit"]')).map(b => ({
-          text: b.textContent?.trim(), type: b.type, cls: b.className,
-        }))
-      );
-      throw new Error(`Submit not found. Buttons seen: ${JSON.stringify(buttons)}`);
+    const clickedLabel = await clickSubmit(page);
+    log(`[login] clicked "${clickedLabel}"`);
+
+    // wait for either navigation OR a page-content change
+    try {
+      await Promise.race([
+        page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20_000 }),
+        page.waitForFunction(() => !document.querySelector('input[name="password"]'), { timeout: 20_000 }),
+      ]);
+    } catch {
+      log('[login] no navigation detected after 20s');
     }
 
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30_000 }).catch(() => null),
-      s.click(),
-    ]);
+    await new Promise(r => setTimeout(r, 1500));
 
-    const url = page.url();
-    log(`[login] post-submit url: ${url}`);
+    const urlAfter = page.url();
+    log(`[login] post-submit url: ${urlAfter} (was ${urlBefore})`);
 
-    // dump what's actually on the page after submit
     const postState = await page.evaluate(() => ({
       title: document.title,
       href: location.href,
-      bodyText: (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 400),
+      bodyText: (document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 600),
       lsKeys: Object.keys(localStorage),
       ssKeys: Object.keys(sessionStorage),
-      hasJwtInAnyStore: (() => {
-        const isJwt = (v) => typeof v === 'string' && /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(v);
-        for (const store of [localStorage, sessionStorage]) {
-          for (let i = 0; i < store.length; i++) {
-            const v = store.getItem(store.key(i));
-            if (isJwt(v)) return true;
-            try { if (JSON.stringify(JSON.parse(v)).includes('eyJ')) return true; } catch {}
-          }
-        }
-        return false;
-      })(),
+      stillOnLoginForm: !!document.querySelector('input[name="password"]'),
     }));
     log(`[login] post-submit state: ${JSON.stringify(postState)}`);
 
-    if (/student-login|\/login/i.test(url) && !/my-educake|student/i.test(url)) {
-      throw new Error(`Login rejected - still on the login page. Body: ${postState.bodyText}`);
+    if (postState.stillOnLoginForm) {
+      throw new Error(`Login form still present after submit. Page text: ${postState.bodyText}`);
     }
 
     step('loading dashboard');
@@ -203,7 +235,7 @@ export async function educakeLogin({ username, password, onStatus = () => {} }) 
 
     log(`[login] success · cookies: ${Object.keys(jar).join(', ')}`);
 
-    return { browser, page, username, cookies: jar, jwt: found.jwt, xsrf, landingUrl: url, baseUrl: config.educakeBaseUrl, capturedAt: Date.now() };
+    return { browser, page, username, cookies: jar, jwt: found.jwt, xsrf, landingUrl: urlAfter, baseUrl: config.educakeBaseUrl, capturedAt: Date.now() };
   } catch (err) {
     log(`[login] FAILED at step: ${err.message}`);
     if (page) { try { await page.close(); } catch {} }
