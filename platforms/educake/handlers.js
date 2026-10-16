@@ -28,8 +28,12 @@ async function refreshPanel(interaction) {
   }
 }
 
+// valid wait window: 1..200 inclusive
+function validWaits(min, max) {
+  return Number.isFinite(min) && Number.isFinite(max) && min >= 1 && max >= 1 && max <= 200 && min <= max;
+}
+
 export const eduHandlers = {
-  // — login flow: button → variant picker → credential modal
   async 'edu:login'(interaction) {
     return interaction.reply({
       flags: MessageFlags.Ephemeral,
@@ -65,9 +69,7 @@ export const eduHandlers = {
     await status('queued');
 
     const task = new Task({
-      userId: interaction.user.id,
-      kind: 'login',
-      timeoutMs: 5 * 60 * 1000,
+      userId: interaction.user.id, kind: 'login', timeoutMs: 5 * 60 * 1000,
       run: async () => {
         try {
           const session = await educakeLogin({ username, password, onStatus: status });
@@ -82,7 +84,6 @@ export const eduHandlers = {
             selectedAttemptId: null, quizzes: null,
             startedAt: Date.now(),
           });
-
           await status('fetching quiz list');
           try {
             const { quizzes } = await listQuizzes(getPlatform(interaction.user.id, 'educake'));
@@ -106,7 +107,6 @@ export const eduHandlers = {
     queue.enqueue(task);
   },
 
-  // — timing
   async 'edu:timing'(interaction) {
     const session = getPlatform(interaction.user.id, 'educake');
     return interaction.showModal(buildTimingModal(session));
@@ -115,15 +115,18 @@ export const eduHandlers = {
   async 'edu:timing:submit'(interaction) {
     const min = Number(interaction.fields.getTextInputValue('min'));
     const max = Number(interaction.fields.getTextInputValue('max'));
-    if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max < min) {
-      return interaction.reply({ content: 'Invalid wait window.', flags: MessageFlags.Ephemeral });
+    if (!validWaits(min, max)) {
+      return interaction.reply({
+        flags: MessageFlags.Ephemeral,
+        embeds: [new EmbedBuilder().setColor(0xED4245).setAuthor({ name: 'Vobo AI · Educake' })
+          .setDescription('Invalid wait window. Min ≥ 1, Max ≤ 200, Min ≤ Max.')],
+      });
     }
     patchPlatform(interaction.user.id, 'educake', { waits: { min, max } });
     await interaction.deferUpdate();
     await refreshPanel(interaction);
   },
 
-  // — settings
   async 'edu:settings'(interaction) {
     const session = getPlatform(interaction.user.id, 'educake');
     return interaction.showModal(buildEducakeSettingsModal(session));
@@ -134,15 +137,18 @@ export const eduHandlers = {
     const max = Number(interaction.fields.getTextInputValue('max'));
     const includeImages = (interaction.fields.getTextInputValue('includeImages') || 'yes').toLowerCase() !== 'no';
     const model = interaction.fields.getTextInputValue('model')?.trim() || null;
-    if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max < min) {
-      return interaction.reply({ content: 'Invalid wait window.', flags: MessageFlags.Ephemeral });
+    if (!validWaits(min, max)) {
+      return interaction.reply({
+        flags: MessageFlags.Ephemeral,
+        embeds: [new EmbedBuilder().setColor(0xED4245).setAuthor({ name: 'Vobo AI · Educake' })
+          .setDescription('Invalid wait window. Min ≥ 1, Max ≤ 200, Min ≤ Max.')],
+      });
     }
     patchPlatform(interaction.user.id, 'educake', { waits: { min, max }, includeImages, model });
     await interaction.deferUpdate();
     await refreshPanel(interaction);
   },
 
-  // — quiz pick
   async 'edu:quiz'(interaction) {
     const attemptId = Number(interaction.values[0]);
     patchPlatform(interaction.user.id, 'educake', { selectedAttemptId: attemptId });
@@ -150,14 +156,14 @@ export const eduHandlers = {
     await refreshPanel(interaction);
   },
 
-  // — run
   async 'edu:start'(interaction) {
     const userId = interaction.user.id;
     const session = getPlatform(userId, 'educake');
     if (!session?.jwt || !session?.selectedAttemptId) {
-      return interaction.reply({ content: 'Log in and pick a quiz first.', flags: MessageFlags.Ephemeral });
+      return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Log in and pick a quiz first.' });
     }
 
+    // ephemeral ack + ephemeral progress message — no stacking on the panel
     await interaction.reply({
       flags: MessageFlags.Ephemeral,
       embeds: [new EmbedBuilder().setColor(ACCENT).setAuthor({ name: 'Vobo AI · Educake' })
@@ -197,7 +203,7 @@ export const eduHandlers = {
               .addFields(
                 { name: 'Quiz', value: summary.quizTitle },
                 { name: 'Score', value: `${summary.correct} / ${summary.total}  ·  ${summary.total ? Math.round((summary.correct / summary.total) * 100) : 0}%` },
-                { name: 'Breakdown', value: `✓ ${summary.correct} correct   ✗ ${summary.incorrect} incorrect   ? ${summary.unmarked} unmarked` },
+                { name: 'Breakdown', value: `✓ ${summary.correct} correct   ✗ ${summary.incorrect} incorrect   ? ${summary.unmarked} unmarked   ⚠ ${summary.noAnswer} no AI answer` },
               )],
             files: [
               new AttachmentBuilder(await renderScoreBar(summary.correct, summary.total), { name: 'score.png' }),
@@ -215,7 +221,7 @@ export const eduHandlers = {
   async 'edu:cancel'(interaction) {
     const session = getPlatform(interaction.user.id, 'educake');
     if (session?.activeSignal) session.activeSignal.cancelled = true;
-    await interaction.reply({ content: 'Cancellation signalled.', flags: MessageFlags.Ephemeral });
+    await interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Cancellation signalled.' });
   },
 };
 
