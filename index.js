@@ -1,5 +1,5 @@
 // language: JavaScript (ESM), file: index.js
-// *Entry point. Boots the HTTP healthcheck, Discord client, hub autopost, and interaction router.*
+// Entry point: HTTP healthcheck, Discord client, hub autopost, interaction router.
 import 'dotenv/config';
 import http from 'node:http';
 import { Client, GatewayIntentBits, Events, MessageFlags } from 'discord.js';
@@ -15,24 +15,35 @@ import { buildHubEmbed, buildHubButtons } from './hub/panel.js';
 import { eduHandlers } from './platforms/educake/handlers.js';
 import { autopostHub } from './hub/autopost.js';
 
-// — Render healthcheck —
+// Render healthcheck
 const PORT = process.env.PORT || 10000;
 http.createServer((req, res) => {
   if (req.url === '/healthz') { res.writeHead(200); res.end('ok'); return; }
   res.writeHead(404); res.end();
 }).listen(PORT, () => log(`[http] listening on :${PORT}`));
 
-// — hub button routes —
+// hub button routes
 register('hub', async (interaction) => {
   const [, action] = interaction.customId.split(':');
+
   if (action === 'start')    return interaction.showModal(buildStartModal());
   if (action === 'settings') return interaction.showModal(buildHubSettingsModal());
   if (action === 'tutorial') return interaction.reply({ embeds: [buildTutorialEmbed()], flags: MessageFlags.Ephemeral });
   if (action === 'back')     return interaction.update({ embeds: [buildHubEmbed()], components: [buildHubButtons()] });
+
+  if (action === 'theme') {
+    const { buildThemeEmbed, buildThemeSelect } = await import('./hub/settingsModal.js');
+    return interaction.reply({
+      flags: MessageFlags.Ephemeral,
+      embeds: [buildThemeEmbed()],
+      components: [buildThemeSelect()],
+    });
+  }
+
   warn(`[hub] unhandled action ${action}`);
 });
 
-// — educake button/modal/select routes —
+// educake button/modal routes
 register('edu', async (interaction) => {
   const handler = eduHandlers[interaction.customId];
   if (!handler) { warn(`[edu] no handler for ${interaction.customId}`); return; }
@@ -43,7 +54,7 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once(Events.ClientReady, async (c) => {
   log(`[bot] logged in as ${c.user.tag} · ${c.guilds.cache.size} guild(s)`);
-  warn('[sessions] in-memory store — sessions drop on redeploy');
+  warn('[sessions] in-memory store - sessions drop on redeploy');
   try { await autopostHub(c); }
   catch (err) { error('[autopost] failed', err); }
 });
@@ -55,30 +66,47 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.isModalSubmit()) {
-      if (interaction.customId === 'hub:start:submit')    return handleStartModal(interaction);
+      if (interaction.customId === 'hub:start:submit') return handleStartModal(interaction);
+
       if (interaction.customId === 'hub:settings:submit') {
         const parsed = parseHubSettings(interaction);
         log('[hub] settings saved', parsed);
         return interaction.reply({
           flags: MessageFlags.Ephemeral,
-          embeds: [{ color: parseInt(parsed.accent.replace('#', ''), 16),
-            author: { name: 'Vobo AI' }, description: 'Settings saved.' }],
+          embeds: [{
+            color: parseInt(parsed.accent?.replace('#', '') ?? config.accent.replace('#', ''), 16),
+            author: { name: 'Vobo AI' },
+            description: 'Settings saved.',
+          }],
         });
       }
+
       if (interaction.customId in eduHandlers) return eduHandlers[interaction.customId](interaction);
       warn(`[modal] unhandled ${interaction.customId}`);
       return;
     }
 
-    if (interaction.isStringSelectMenu() && interaction.customId === 'edu:quiz') {
-      return eduHandlers['edu:quiz'](interaction);
+    if (interaction.isStringSelectMenu()) {
+      if (interaction.customId === 'edu:quiz')          return eduHandlers['edu:quiz'](interaction);
+      if (interaction.customId === 'edu:login:variant') return eduHandlers['edu:login:variant'](interaction);
+
+      if (interaction.customId === 'hub:theme:pick') {
+        const hex = interaction.values[0];
+        const { buildThemeEmbed } = await import('./hub/settingsModal.js');
+        await interaction.update({ embeds: [buildThemeEmbed(hex)], components: [] });
+        log(`[theme] ${interaction.user.id} -> #${hex}`);
+        return;
+      }
+
+      warn(`[select] unhandled ${interaction.customId}`);
+      return;
     }
 
     if (interaction.isButton()) return dispatchButton(interaction);
   } catch (err) {
     error('[interaction] unhandled', err);
     if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: 'Something broke — check the logs.', flags: MessageFlags.Ephemeral }).catch(() => {});
+      await interaction.reply({ content: 'Something broke - check the logs.', flags: MessageFlags.Ephemeral }).catch(() => {});
     }
   }
 });
