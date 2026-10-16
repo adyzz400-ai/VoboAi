@@ -1,33 +1,31 @@
 // language: JavaScript (ESM), file: hub/autopost.js
 import { ChannelType } from 'discord.js';
 import { buildHubEmbed, buildHubButtons } from './panel.js';
+import { getTheme } from './sessionStore.js';
 import { log, warn } from '../utils/logger.js';
-
-const HUB_FOOTER_PREFIX = 'Vobo AI · v';
 
 export async function autopostHub(client) {
   const channelId = process.env.HUB_CHANNEL_ID;
-  if (!channelId) { warn('[autopost] HUB_CHANNEL_ID not set - skipping hub autopost'); return; }
+  if (!channelId) { warn('[autopost] HUB_CHANNEL_ID not set'); return; }
 
   const channel = await client.channels.fetch(channelId).catch(() => null);
-  if (!channel || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)) {
-    warn(`[autopost] channel ${channelId} not found or not a text channel`);
-    return;
+  if (!channel) { warn('[autopost] channel ' + channelId + ' not found'); return; }
+  if (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement) {
+    warn('[autopost] channel is not a text channel'); return;
   }
 
-  const recent = await channel.messages.fetch({ limit: 50 }).catch(() => null);
+  const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
   if (recent) {
-    const existing = recent.find(m =>
-      m.author.id === client.user.id &&
-      m.embeds?.length > 0 &&
-      (m.embeds[0].footer?.text ?? '').startsWith(HUB_FOOTER_PREFIX)
-    );
-    if (existing) {
-      log(`[autopost] hub panel already exists (msg ${existing.id}) - not reposting`);
-      return;
+    const stale = recent.filter(m => m.author.id === client.user.id && m.embeds && m.embeds.length > 0);
+    if (stale.size > 0) {
+      log('[autopost] removing ' + stale.size + ' stale bot embed(s)');
+      for (const m of stale.values()) {
+        try { await m.delete(); } catch (e) { /* ignore */ }
+      }
     }
   }
 
-  const msg = await channel.send({ embeds: [buildHubEmbed()], components: [buildHubButtons()] });
-  log(`[autopost] posted hub panel to #${channel.name} (msg ${msg.id})`);
+  const hex = getTheme('');
+  const msg = await channel.send({ embeds: [buildHubEmbed(hex)], components: [buildHubButtons()] });
+  log('[autopost] posted hub panel (msg ' + msg.id + ')');
 }
