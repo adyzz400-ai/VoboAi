@@ -1,4 +1,4 @@
-// language: JavaScript (ESM), file: platforms/educake/autocompleter.js
+// languageset: JavaScript (ESM), file: platforms/educake/autocompleter.js
 import { AttachmentBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { config } from '../../utils/config.js';
 import { log, warn } from '../../utils/logger.js';
@@ -7,33 +7,43 @@ import { submitAnswer } from './quizzes.js';
 import { coerceGivenAnswer } from './parser.js';
 import { getAIanswer } from './getAIanswer.js';
 import { renderEducakeProgress } from './progress.js';
+import { getTheme } from '../../hub/sessionStore.js';
 
-const ACCENT = parseInt(config.accent.replace('#', ''), 16);
-
-function buildProgressEmbed({ quizTitle, index, total, q, waitUntilUnix, correct, incorrect, status }) {
+function buildProgressEmbed(accent, opts) {
   const e = new EmbedBuilder()
-    .setColor(ACCENT)
+    .setColor(accent)
     .setAuthor({ name: 'Vobo AI · running' })
     .addFields(
-      { name: 'Quiz', value: quizTitle || '—' },
-      { name: 'Progress', value: `Question ${index + 1} of ${total}` },
-      { name: 'Current', value: (q?.prompt ?? '—').slice(0, 280) || '—' },
+      { name: 'Quiz', value: opts.quizTitle || '—' },
+      { name: 'Progress', value: 'Question ' + (opts.index + 1) + ' of ' + opts.total },
+      { name: 'Current', value: (opts.q?.prompt ?? '—').slice(0, 280) || '—' },
     );
-  if (waitUntilUnix) {
-    e.addFields({ name: 'Timing', value: `Next answer: <t:${Math.floor(waitUntilUnix)}:R>` });
+  if (opts.waitUntilUnix) {
+    e.addFields({ name: 'Timing', value: 'Next answer: <t:' + Math.floor(opts.waitUntilUnix) + ':R>' });
   }
-  e.addFields({ name: 'Score so far', value: `✓ ${correct} correct   ✗ ${incorrect} incorrect` });
-  if (status) e.setFooter({ text: status });
+  e.addFields({ name: 'Score so far', value: '✓ ' + opts.correct + ' correct   ✗ ' + opts.incorrect + ' incorrect' });
+  if (opts.status) e.setFooter({ text: opts.status });
   return e;
 }
 
 function runningButtons() {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('edu:cancel').setLabel('Cancel').setEmoji('⛔').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomIdLabel('Cancel').setEmoji('⛔').setStyle(ButtonStyle.Danger),
   );
 }
 
-export async function runAttempt({ session, attemptId, attempt, interaction, signal, model, quizTitle }) {
+export async function runAttempt(args) {
+  const session = args.session;
+  const attemptId = args.attemptId;
+  const attempt = args.attempt;
+  const interaction = args.interaction;
+  const signal = args.signal;
+  const model = args.model;
+  const quizTitle = args.quizTitle;
+  const userId = args.userId;
+
+  const accent = parseInt(getTheme(userId).replace('#', ''), 16);
+
   const order = attempt.questions.map(String);
   const map = attempt.questionMap ?? {};
   const total = order.length;
@@ -46,6 +56,11 @@ export async function runAttempt({ session, attemptId, attempt, interaction, sig
 
     const vid = order[i];
     const q = map[vid];
+    if (!q) {
+      warn('[run] no question object for variant ' + vid + ' — skipping');
+      continue;
+    }
+
     const normQ = {
       variantId: q.id,
       testQuestionId: q.testQuestionId,
@@ -58,32 +73,29 @@ export async function runAttempt({ session, attemptId, attempt, interaction, sig
 
     const barBuf = await renderEducakeProgress(i, total);
     await interaction.editReply({
-      embeds: [buildProgressEmbed({ quizTitle, index: i, total, q: normQ, correct, incorrect, status: 'asking AI…' })],
+      embeds: [buildProgressEmbed(accent, { quizTitle: quizTitle, index: i, total: total, q: normQ, correct: correct, incorrect: incorrect, status: 'asking AI…' })],
       files: [new AttachmentBuilder(barBuf, { name: 'progress.png' })],
       components: [runningButtons()],
     }).catch(() => {});
 
-    // ask Gemini (with retry + fallback chain)
     let geminiResp = null;
     let geminiFailed = false;
-    try { geminiResp = await getAIanswer(normQ, session, { model }); }
-    catch (err) { warn(`[run] gemini threw on Q${i + 1}: ${err.message}`); geminiFailed = true; }
-
+    try { geminiResp = await getAIanswer(normQ, session, { model: model }); }
+    catch (err) { warn('[run] gemini threw on Q' + (i + 1) + ': ' + err.message); geminiFailed = true; }
     if (!geminiResp?.answer) geminiFailed = true;
 
     let given;
     if (geminiFailed) {
-      // safe fallback per question kind — never empty (Educake 400s on empty)
       if (normQ.kind === 'multiple_choice' && normQ.choices?.length) given = normQ.choices[0];
       else if (normQ.kind === 'number') given = '0';
       else given = 'unknown';
       noAnswer++;
-      log(`[run] Q${i + 1} had no AI answer — submitting fallback "${given}"`);
+      log('[run] Q' + (i + 1) + ' fallback answer: "' + given + '"');
     } else {
       given = coerceGivenAnswer(normQ, geminiResp.answer);
       if (!given) {
-        // coerce rejected the model output — pick something non-empty
-        given = normQ.kind === 'multiple_choice' && normQ.choices?.length ? normQ.choices[0] : 'unknown';
+        if (normQ.kind === 'multiple_choice' && normQ.choices?.length) given = normQ.choices[0];
+        else given = 'unknown';
       }
     }
 
@@ -93,7 +105,7 @@ export async function runAttempt({ session, attemptId, attempt, interaction, sig
     const waitUntilUnix = Math.floor((Date.now() + waitMs) / 1000);
 
     await interaction.editReply({
-      embeds: [buildProgressEmbed({ quizTitle, index: i, total, q: normQ, waitUntilUnix, correct, incorrect, status: 'waiting before submit…' })],
+      embeds: [buildProgressEmbed(accent, { quizTitle: quizTitle, index: i, total: total, q: normQ, waitUntilUnix: waitUntilUnix, correct: correct, incorrect: incorrect, status: 'waiting before submit…' })],
       files: [new AttachmentBuilder(barBuf, { name: 'progress.png' })],
       components: [runningButtons()],
     }).catch(() => {});
@@ -110,15 +122,15 @@ export async function runAttempt({ session, attemptId, attempt, interaction, sig
     let res = null;
     try {
       res = await submitAnswer(session, {
-        attemptId,
+        attemptId: attemptId,
         testQuestionId: q.testQuestionId,
         variantId: q.id,
         givenAnswer: given,
       });
-    } catch (err) { warn(`[run] submit failed on Q${i + 1}: ${err.message}`); }
+    } catch (err) { warn('[run] submit failed on Q' + (i + 1) + ': ' + err.message); }
 
     const isCorrect = res?.result === true;
-    const inReview  = res?.inReview === true;
+    const inReview = res?.inReview === true;
     if (isCorrect) correct++;
     else if (inReview) unmarked++;
     else incorrect++;
@@ -126,27 +138,27 @@ export async function runAttempt({ session, attemptId, attempt, interaction, sig
     results.push({
       index: i,
       prompt: q.question,
-      given,
+      given: given,
       correctAnswers: res?.correctAnswers ?? [],
       reasoning: res?.reasoning ?? '',
       result: res?.result ?? null,
-      inReview,
+      inReview: inReview,
       type: q.type,
       unit: q.extra || null,
       image: q.image || null,
-      geminiFailed,
+      geminiFailed: geminiFailed,
     });
   }
 
   return {
     quizTitle: quizTitle || attempt.name || 'Educake quiz',
-    total,
-    correct,
-    incorrect,
-    unmarked,
-    noAnswer,
+    total: total,
+    correct: correct,
+    incorrect: incorrect,
+    unmarked: unmarked,
+    noAnswer: noAnswer,
     cancelled: !!signal.cancelled,
     durationSeconds: Math.floor((Date.now() - (session.startedAt ?? Date.now())) / 1000),
-    results,
+    results: results,
   };
 }
