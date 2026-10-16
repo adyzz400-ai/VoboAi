@@ -1,89 +1,83 @@
 // language: JavaScript (ESM), file: platforms/educake/client.js
-// *Every Educake API call runs inside the logged-in Puppeteer page via page.evaluate(fetch()).
-//  Cloudflare's cf_clearance cookie is bound to the browser's TLS fingerprint — raw axios gets 403.*
 import crypto from 'node:crypto';
 import { config } from '../../utils/config.js';
 import { log, warn } from '../../utils/logger.js';
 
-function buildPageFetch(attempt) {
-  // Runs *inside* the browser context. No closure over Node — must serialize.
-  return async ({ url, method, body, headers }) => {
-    const init = {
-      method,
-      credentials: 'include',
-      mode: 'cors',
-      headers: {
-        'accept': 'application/json, text/plain, */*',
-        'accept-language': 'en-GB,en;q=0.9',
-        'origin': 'https://my.educake.co.uk',
-        'referer': `https://my.educake.co.uk${location.pathname}`,
-        ...headers,
-      },
-    };
-    if (body !== undefined) {
-      init.body = JSON.stringify(body);
-      init.headers['content-type'] = 'application/json';
-    }
-    const res = await fetch(url, init);
-    const text = await res.text();
-    let json = null;
-    try { json = text ? JSON.parse(text) : null; } catch { /* non-JSON */ }
-    return { status: res.status, ok: res.ok, text, json };
-  };
-}
-
 export class EducakeClient {
   constructor(page, session) {
     this.page = page;
-    this.session = session; // { jwt, xsrf, attemptId? }
+    this.session = session;
   }
 
-  async call(path, { method = 'GET', body, extraHeaders = {}, retryOn401 = true } = {}) {
-    const url = path.startsWith('http') ? path : `${config.educakeBaseUrl}${path}`;
+  async call(path, opts) {
+    opts = opts || {};
+    const method = opts.method || 'GET';
+    const body = opts.body;
+    const retryOn401 = opts.retryOn401 !== false;
+    const url = path.startsWith('http') ? path : config.educakeBaseUrl + path;
+
     const headers = {
-      'authorization': `Bearer ${this.session.jwt}`,
+      'authorization': 'Bearer ' + this.session.jwt,
       'x-xsrf-token': this.session.xsrf,
       'x-correlation-id': crypto.randomUUID(),
       'accept': 'application/json;version=2',
-      ...extraHeaders,
     };
 
-    const result = await this.page.evaluate(
-      // args pattern: puppeteer serializes fn + args
-      async (fetchArgs) => {
-        const { url, method, body, headers } = fetchArgs;
-        const init = {
-          method,
-          credentials: 'include',
-          mode: 'cors',
-          headers: {
-            'accept': 'application/json, text/plain, */*',
-            'accept-language': 'en-GB,en;q=0.9',
-            'origin': 'https://my.educake.co.uk',
-            'referer': `https://my.educake.co.uk${location.pathname}`,
-            ...headers,
-          },
-        };
-        if (body !== undefined) {
-          init.body = JSON.stringify(body);
-          init.headers['content-type'] = 'application/json';
-        }
-        const res = await fetch(url, init);
-        const text = await res.text();
-        let json = null;
-        try { json = text ? JSON.parse(text) : null; } catch { /* keep null */ }
-        return { status: res.status, ok: res.ok, text, json };
-      },
-      { url, method, body, headers },
-    );
+    log('[client] ' + method + ' ' + path + ' — evaluating in page');
+
+    let result;
+    try {
+      result = await this.page.evaluate(fetchArgs => {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 20000);
+        return (async () => {
+          try {
+            const init = {
+              method: fetchArgs.method,
+              credentials: 'include',
+              mode: 'cors',
+              signal: ctrl.signal,
+              headers: {
+                'accept': 'application/json, text/plain, */*',
+                'accept-language': 'en-GB,en;q=0.9',
+                'origin': 'https://my.educake.co.uk',
+                'referer': 'https://my.educake.co.uk' + location.pathname,
+                ...fetchArgs.headers,
+              },
+            };
+            if (fetchArgs.body !== undefined && fetchArgs.body !== null) {
+              init.body = JSON.stringify(fetchArgs.body);
+              init.headers['content-type'] = 'application/json';
+            }
+            const res = await fetch(fetchArgs.url, init);
+            const text = await res.text();
+            let json = null;
+            try { json = text ? JSON.parse(text) : null; } catch (e) { /* not json */ }
+            return { status: res.status, ok: res.ok, text: text, json: json };
+          } catch (err) {
+            return { status: 0, ok: false, text: 'evaluate-error: ' + err.message, json: null };
+          } finally {
+            clearTimeout(timer);
+          }
+        })();
+      }, { url, method, body, headers });
+    } catch (err) {
+      warn('[client] page.evaluate threw: ' + err.message);
+      const e = new Error('Educake ' + method + ' ' + path + ' — evaluate failed: ' + err.message);
+      e.status = 0;
+      throw e;
+    }
+
+    log('[client] ' + method + ' ' + path + ' — response ' + result.status);
 
     if (!result.ok) {
-      if (result.status === 401 && retryOn401 && this.session.onAuthFail) {
-        warn(`[educake] 401 on ${method} ${path} — attempting re-auth`);
+      if (result.status === 401 && retryOn401 && typeof this.session.onAuthFail === 'function') {
+        warn('[client] 401 — attempting re-auth');
         await this.session.onAuthFail();
-        return this.call(path, { method, body, extraHeaders, retryOn401: false });
+        opts.retryOn401 = false;
+        return this.call(path, opts);
       }
-      const err = new Error(`Educake ${method} ${path} → ${result.status}`);
+      const err = new Error('Educake ' + method + ' ' + path + ' → ' + result.status + ' — ' + result.text.slice(0, 200));
       err.status = result.status;
       err.body = result.json ?? result.text;
       throw err;
@@ -91,8 +85,13 @@ export class EducakeClient {
     return result.json;
   }
 
-  async get(path, opts = {})   { return this.call(path, { ...opts, method: 'GET' }); }
-  async post(path, body, opts) { return this.call(path, { ...opts, method: 'POST', body }); }
-}
+  async get(path, opts) {
+    const o = Object.assign({}, opts || {}, { method: 'GET' });
+    return this.call(path, o);
+  }
 
-void buildPageFetch; // keep linter quiet on unused helper if needed later for non-page transport
+  async post(path, body, opts) {
+    const o = Object.assign({}, opts || {}, { method: 'POST', body: body });
+    return this.call(path, o);
+  }
+}
