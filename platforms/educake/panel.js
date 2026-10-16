@@ -52,13 +52,16 @@ export async function buildPanel({ interaction }) {
       rows.push(new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder().setCustomId('edu:quiz').setPlaceholder('Select a quiz…').addOptions(opts),
       ));
+      // Timing button lives ONLY in this row's sibling — visible only when quizzes are loaded
+      rows.push(new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('edu:timing').setLabel('Set wait time').setEmoji('🕒').setStyle(ButtonStyle.Secondary),
+      ));
     }
   }
 
   rows.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('hub:back').setLabel('Hub').setEmoji('⬅').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('edu:login').setLabel(loggedIn ? 'Re-login' : 'Login').setEmoji('🔑').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('edu:timing').setLabel('Timing').setEmoji('🕒').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('edu:settings').setLabel('Settings').setEmoji('⚙').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('edu:start').setLabel('Start').setEmoji('▶').setStyle(ButtonStyle.Success)
       .setDisabled(!loggedIn || !session.selectedAttemptId),
