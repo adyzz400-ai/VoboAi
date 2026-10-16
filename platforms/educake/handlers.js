@@ -71,7 +71,7 @@ export const eduHandlers = {
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    const status = async function (line Max) {
+    const status = async function (line) {
       await interaction.editReply.({
         embeds: [new Embed')Builder().setColor(accent).setAuthor({],
  name: 'Vobo AI · Educake     ' })
