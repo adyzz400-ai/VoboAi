@@ -68,20 +68,14 @@ async function _run(args) {
   const quizTitle = args.quizTitle;
   const userId = args.userId;
 
-  // Fetch the user's chosen theme color
   const hex = getTheme(userId);
   const accent = parseInt(hex.replace('#', ''), 16);
 
   const map = attempt.questionMap ?? {};
-  
-  const order = attempt.questions
-    .map(String)
-    .filter(id => map[id] && !map[id].answer);
-
+  const order = attempt.questions.map(String).filter(id => map[id] && !map[id].answer);
   const total = order.length;
   
   if (total === 0) {
-    log('[run] No unanswered questions found.');
     return { quizTitle, total: 0, correct: 0, incorrect: 0, unmarked: 0, noAnswer: 0, cancelled: false, durationSeconds: 0, results: [] };
   }
 
@@ -112,7 +106,6 @@ async function _run(args) {
       quizTitle, index: i, total, q: normQ, correct, incorrect, status: 'asking AI…' 
     });
     
-    // Pass current correct/incorrect to the progress bar text
     const barBuf = await renderEducakeProgress(i, total, correct, incorrect);
     const progressFile = new AttachmentBuilder(barBuf, { name: 'progress.png' });
 
@@ -127,32 +120,38 @@ async function _run(args) {
     
     try { 
       geminiResp = await getAIanswer(normQ, session, { model: model }); 
-      log('[run] Q' + (i+1) + ' Gemini OK');
     } catch (err) { 
-      warn('[run] Q' + (i+1) + ' gemini threw: ' + err.message); 
       geminiFailed = true; 
     }
     
     if (!geminiResp || !geminiResp.answer) geminiFailed = true;
 
-    let given;
+    // FIX: If AI fails, ABORT the loop. Don't guess.
     if (geminiFailed) {
-      if (normQ.kind === 'multiple_choice' && normQ.choices?.length) given = normQ.choices[0];
-      else if (normQ.kind === 'number') given = '0';
-      else given = 'unknown';
-      noAnswer++;
-    } else {
-      given = coerceGivenAnswer(normQ, geminiResp.answer);
-      if (!given) {
-        if (normQ.kind === 'multiple_choice' && normQ.choices?.length) given = normQ.choices[0];
-        else given = 'unknown';
-      }
+      log('[run] AI failed or rate limited. Aborting loop to prevent bad answers.');
+      noAnswer += (total - i); // Mark remaining as unanswered
+      
+      const errEmbed = new EmbedBuilder();
+      errEmbed.setColor(0xED4245);
+      errEmbed.setAuthor({ name: 'Vobo AI · halted' });
+      errEmbed.setDescription('❌ Gemini API rate limit reached or all models failed.\nStopping run to prevent submitting wrong answers.');
+      
+      await interaction.editReply({ embeds: [errEmbed], components: [] }).catch(function() {});
+      break; // Break out of the loop
     }
 
+    let given = coerceGivenAnswer(normQ, geminiResp.answer);
+    if (!given) {
+      given = geminiResp.answer; // Fallback to whatever the AI sent
+    }
+
+    // Ensure wait times are long enough to avoid rate limits
     let minSec = Number(session.waits?.min ?? config.waits.min);
     let maxSec = Number(session.waits?.max ?? config.waits.max);
-    if (!Number.isFinite(minSec) || minSec < 1 || minSec > 200) minSec = 4;
-    if (!Number.isFinite(maxSec) || maxSec < minSec || maxSec > 200) maxSec = 12;
+    
+    // Enforce minimum 8s wait if we keep hitting 429s
+    if (minSec < 8) minSec = 8;
+    if (maxSec < 15) maxSec = 15;
 
     const minMs = minSec * 1000;
     const maxMs = maxSec * 1000;
@@ -188,7 +187,6 @@ async function _run(args) {
         variantId: q.id,
         givenAnswer: given,
       });
-      log('[run] Q' + (i+1) + ' result: ' + (res?.result ? 'Correct' : 'Incorrect'));
     } catch (err) { 
       warn('[run] Q' + (i + 1) + ' submit failed: ' + err.message); 
     }
@@ -206,15 +204,10 @@ async function _run(args) {
     });
   }
 
-  log('[run] finished all questions, marking quiz complete...');
-  
-  if (!signal.cancelled) {
+  if (!signal.cancelled && noAnswer === 0) {
     try {
       await finishQuiz(session, attemptId);
-      log('[run] Quiz marked as finished.');
-    } catch (e) {
-      warn('[run] Failed to finish quiz: ' + e.message);
-    }
+    } catch (e) {}
   }
 
   return {
