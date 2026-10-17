@@ -22,20 +22,6 @@ function accentFor(userId) {
   return parseInt(hex.replace('#', ''), 16);
 }
 
-async function replyEphemeral(interaction, result) {
-  const payload = { 
-    embeds: [result.embed], 
-    components: result.components, 
-    flags: MessageFlags.Ephemeral 
-  };
-  
-  if (interaction.deferred || interaction.replied) {
-    await interaction.editReply(payload);
-  } else {
-    await interaction.reply(payload);
-  }
-}
-
 function validWaits(min, max) {
   if (!Number.isFinite(min)) return false;
   if (!Number.isFinite(max)) return false;
@@ -51,8 +37,7 @@ export const eduHandlers = {
     const accent = accentFor(interaction.user.id);
     const embed = buildVariantEmbed(accent);
     const select = buildVariantSelect();
-    const payload = { flags: MessageFlags.Ephemeral, embeds: [embed], components: [select] };
-    return interaction.reply(payload);
+    return interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed], components: [select] });
   },
 
   async 'edu:login:variant'(interaction) {
@@ -60,10 +45,7 @@ export const eduHandlers = {
     if (choice !== 'educake') {
       let label = 'Google';
       if (choice === 'educake-ms') label = 'Microsoft';
-      const embed = new EmbedBuilder();
-      embed.setColor(0xEAB308);
-      embed.setAuthor({ name: 'Vobo AI · Educake' });
-      embed.setDescription('**' + label + ' login** is coming soon. Use Educake username for now.');
+      const embed = new EmbedBuilder().setColor(0xEAB308).setAuthor({ name: 'Vobo AI · Educake' }).setDescription('**' + label + ' login** is coming soon.');
       return interaction.update({ embeds: [embed], components: [] });
     }
     return interaction.showModal(buildEducakeLoginModal());
@@ -74,24 +56,20 @@ export const eduHandlers = {
     const password = interaction.fields.getTextInputValue('password');
     const accent = accentFor(interaction.user.id);
 
-    // Force ephemeral defer
+    // Defer ephemerally to create a new, dismissible message
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const status = async function (line) {
-      const embed = new EmbedBuilder();
-      embed.setColor(accent);
-      embed.setAuthor({ name: 'Vobo AI · Educake' });
-      embed.setDescription('Logging in — this panel updates live.');
-      embed.addFields({ name: 'Status', value: line });
+      const embed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Educake' })
+        .setDescription('Logging in — this panel updates live.')
+        .addFields({ name: 'Status', value: line });
       await interaction.editReply({ embeds: [embed] }).catch(function () {});
     };
 
     await status('queued');
 
     const task = new Task({
-      userId: interaction.user.id,
-      kind: 'login',
-      timeoutMs: 5 * 60 * 1000,
+      userId: interaction.user.id, kind: 'login', timeoutMs: 5 * 60 * 1000,
       run: async function () {
         try {
           const session = await educakeLogin({ username: username, password: password, onStatus: status });
@@ -107,24 +85,18 @@ export const eduHandlers = {
           try {
             const result = await listQuizzes(getPlatform(interaction.user.id, 'educake'));
             patchPlatform(interaction.user.id, 'educake', { quizzes: result.quizzes });
-          } catch (err) {
-            warn('[educake] quiz list failed: ' + err.message);
-          }
+          } catch (err) { warn('[educake] quiz list failed: ' + err.message); }
 
+          // Edit the ephemeral reply. This KEEPS the "Dismiss message" footer!
           const panel = await buildPanel({ interaction: interaction });
-          // Strict ephemeral
-          await replyEphemeral(interaction, panel);
+          await interaction.editReply({ embeds: [panel.embed], components: panel.components });
         } catch (err) {
           log('[educake] login error: ' + err.message);
-          const embed = new EmbedBuilder();
-          embed.setColor(0xED4245);
-          embed.setAuthor({ name: 'Vobo AI · Educake' });
-          embed.setDescription('❌ Login failed: ' + err.message);
+          const embed = new EmbedBuilder().setColor(0xED4245).setAuthor({ name: 'Vobo AI · Educake' }).setDescription('❌ Login failed: ' + err.message);
           await interaction.editReply({ embeds: [embed] }).catch(function () {});
         }
       },
     });
-
     queue.enqueue(task);
   },
 
@@ -199,9 +171,7 @@ export const eduHandlers = {
 
     const signal = { cancelled: false };
     const task = new Task({
-      userId: userId,
-      kind: 'run',
-      timeoutMs: 30 * 60 * 1000,
+      userId: userId, kind: 'run', timeoutMs: 30 * 60 * 1000,
       run: async function () {
         try {
           const opened = await openAttempt(session, quizRow.attemptId);
