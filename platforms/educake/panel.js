@@ -55,40 +55,48 @@ export async function buildPanel({ interaction }) {
   const container = new ContainerBuilder();
   container.setAccentColor(accent);
   
-  const titleText = new TextDisplayBuilder().setContent('### Vobo AI · Educake');
-  container.addTextDisplayComponents(titleText);
-  container.addSeparatorComponents(new SeparatorBuilder());
-
-  const statusText = new TextDisplayBuilder().setContent(
-    '**Status**\n' + statusLine + '\n' + statusExtra +
-    '\n\n**Quiz**\n' + quizLine +
-    '\n\n**Wait per question**\n' + waitValue
+  // 1. Title
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent('### Vobo AI · Educake')
   );
-  container.addTextDisplayComponents(statusText);
+  
   container.addSeparatorComponents(new SeparatorBuilder());
 
-  // The Dropdown & Buttons INSIDE the container
+  // 2. Status
+  const statusText = '**Status**\n' + statusLine + '\n' + statusExtra +
+    '\n\n**Quiz**\n' + quizLine +
+    '\n\n**Wait per question**\n' + waitValue;
+    
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(statusText)
+  );
+  
+  container.addSeparatorComponents(new SeparatorBuilder());
+
+  // 3. Dropdown
   if (loggedIn && hasQuizzes) {
     const outstanding = session.quizzes.filter(q => q.status !== 'completed' && !q.isArchived).slice(0, 25);
-    const options = outstanding.map(q => {
-      const due = q.dueDate ? ' · due ' + formatDueDate(q.dueDate) : '';
-      const total = q.questionCount || 1;
-      const correct = q.correctCount || 0;
-      const acc = Math.round((correct / total) * 100);
-      
-      return new StringSelectMenuOptionBuilder()
-        .setLabel(String(q.title).slice(0, 100))
-        .setDescription(`${q.subject || '—'} · ${q.questionCount} Qs · ${acc}% Accuracy${due}`.slice(0, 100))
-        .setValue(String(q.attemptId))
-        .setDefault(String(q.attemptId) === String(session.selectedAttemptId || ''));
-    });
+    
+    if (outstanding.length > 0) {
+      const options = outstanding.map(q => {
+        const due = q.dueDate ? ' · due ' + formatDueDate(q.dueDate) : '';
+        const total = q.questionCount || 1;
+        const correct = q.correctCount || 0;
+        const acc = Math.round((correct / total) * 100);
+        
+        return new StringSelectMenuOptionBuilder()
+          .setLabel(String(q.title).slice(0, 100))
+          .setDescription(`${q.subject || '—'} · ${q.questionCount} Qs · ${acc}% Accuracy${due}`.slice(0, 100))
+          .setValue(String(q.attemptId))
+          .setDefault(String(q.attemptId) === String(session.selectedAttemptId || ''));
+      });
 
-    if (options.length > 0) {
       const menu = new StringSelectMenuBuilder().setCustomId('edu:quiz').setPlaceholder('Select a quiz…').addOptions(options);
       container.addActionRowComponents(new ActionRowBuilder().addComponents(menu));
     }
   }
 
+  // 4. Buttons
   const loginBtn = new ButtonBuilder().setCustomId('edu:login').setLabel(loggedIn ? 'Re-login' : 'Login').setEmoji('🔑').setStyle(ButtonStyle.Primary);
   const timingBtn = new ButtonBuilder().setCustomId('edu:timing').setLabel('Wait time').setEmoji('🕒').setStyle(ButtonStyle.Secondary);
   const settingsBtn = new ButtonBuilder().setCustomId('edu:settings').setLabel('Settings').setEmoji('⚙').setStyle(ButtonStyle.Secondary);
