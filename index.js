@@ -15,6 +15,11 @@ import { eduHandlers } from './platforms/educake/handlers.js';
 import { autopostHub } from './hub/autopost.js';
 import { getTheme, setTheme } from './hub/sessionStore.js';
 
+// Catch all unhandled promise rejections to prevent the process from crashing
+process.on('unhandledRejection', (err) => {
+  error('[process] Unhandled rejection', err);
+});
+
 const PORT = process.env.PORT || 10000;
 http.createServer((req, res) => {
   if (req.url === '/healthz') { res.writeHead(200); res.end('ok'); return; }
@@ -101,7 +106,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (interaction.isButton()) return dispatchButton(interaction);
   } catch (err) {
-    // Gracefully catch Discord's "Unknown interaction" (10062) error so the bot doesn't crash
     if (err.code === 10062 || err.code === 40060) {
       warn('[interaction] Interaction expired or already acknowledged.');
       return;
