@@ -1,5 +1,5 @@
 // language: JavaScript (ESM), file: platforms/educake/autocompleter.js
-import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } from 'discord.js';
 import { config } from '../../utils/config.js';
 import { log, warn } from '../../utils/logger.js';
 import { sleep } from '../../utils/formatTime.js';
@@ -7,26 +7,17 @@ import { submitAnswer, finishQuiz } from './quizzes.js';
 import { coerceGivenAnswer } from './parser.js';
 import { getAIanswer } from './getAIanswer.js';
 import { getTheme } from '../../hub/sessionStore.js';
+import { renderSenAIProgressBar } from '../../utils/senaiLayout.js';
 
 function buildProgressEmbed(accent, opts) {
   const e = new EmbedBuilder();
   e.setColor(accent);
   e.setAuthor({ name: 'Vobo AI · running' });
   
-  const pct = Math.round(((opts.correct + opts.incorrect) / opts.total) * 100) || 0;
-  
-  // Generate the bar: 10 blocks total
-  const totalBlocks = 10;
-  const filledBlocks = Math.round((pct / 100) * totalBlocks);
-  const emptyBlocks = totalBlocks - filledBlocks;
-  
-  const bar = '▰'.repeat(filledBlocks) + '▱'.repeat(emptyBlocks);
-  
-  // Format: "1. Task 1 `2%`" followed by the bar on a new line
-  const progressText = '**' + (opts.index + 1) + '. Task ' + (opts.index + 1) + '** `' + pct + '%`\n' + bar;
+  // This puts the image INSIDE the embed
+  e.setImage('attachment://progress.png');
   
   e.addFields(
-    { name: 'Progress', value: progressText },
     { name: 'Current', value: (opts.q?.prompt || '—').slice(0, 280) || '—' }
   );
   
@@ -110,12 +101,18 @@ async function _run(args) {
     };
 
     log('[run] Q' + (i+1) + '/' + total + ' asking Gemini...');
+    
+    // Render the SenAI layout as an image
+    const barBuf = await renderSenAIProgressBar(i + 1, total, correct);
+    const progressFile = new AttachmentBuilder(barBuf, { name: 'progress.png' });
+
     const embed = buildProgressEmbed(accent, { 
       quizTitle, index: i, total, q: normQ, correct, incorrect, status: 'asking AI…' 
     });
 
     const askPayload = {
       embeds: [embed],
+      files: [progressFile],
       components: [runningButtons()]
     };
 
@@ -169,6 +166,7 @@ async function _run(args) {
 
     const waitPayload = {
       embeds: [waitEmbed],
+      files: [progressFile],
       components: [runningButtons()]
     };
 
