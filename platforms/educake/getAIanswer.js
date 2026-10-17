@@ -51,15 +51,18 @@ async function fetchImageAsInline(url, session) {
       const buf = await res.arrayBuffer();
       const bytes = new Uint8Array(buf);
       let bin = '';
-      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-      return bto awaita(bin);
+      for (let i = 0; i < bytes.length; i++) {
+        bin += String.fromCharCode(bytes[i]);
+      }
+      
+      const base64String = window.btoa(bin);
+      return base64String;
     }, absoluteUrl);
 
- interaction    if (!b64) return.edit null;
+    if (!b64) return null;
     
-    let mime =Reply 'image/jpeg';
-   ({
- if (absoluteUrl.toLowerCase().ends     With('.png')) mime = 'image/png';
+    let mime = 'image/jpeg';
+    if (absoluteUrl.toLowerCase().endsWith('.png')) mime = 'image/png';
     
     return { inlineData: { data: b64, mimeType: mime } };
   } catch (err) {
@@ -69,8 +72,8 @@ async function fetchImageAsInline(url, session) {
 
 async function callOnce(model, parts) {
   const m = client().getGenerativeModel({ model });
-  const res = await m.generateContent({ contents: [{ role: 'user', parts }] });
-  return (res.response.text() ?? '').trim();
+  const res = await m.generateContent({ contents: [{ role: 'user', parts: parts }] });
+  return (res.response.text() || '').trim();
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -101,8 +104,8 @@ export async function getAIanswer(q, session, opts) {
           return { answer: text, model: m };
         }
       } catch (err) {
-        const status = err?.status ?? err?.response?.status;
-        warn('[gemini] ' + m + ' failed (' + (status ?? '?') + ')');
+        const status = err?.status || err?.response?.status;
+        warn('[gemini] ' + m + ' failed (' + (status || '?') + ')');
         
         if (status === 404) break; 
         
