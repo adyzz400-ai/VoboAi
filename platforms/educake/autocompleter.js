@@ -68,12 +68,12 @@ async function _run(args) {
   const quizTitle = args.quizTitle;
   const userId = args.userId;
 
+  // Fetch the user's chosen theme color
   const hex = getTheme(userId);
   const accent = parseInt(hex.replace('#', ''), 16);
 
   const map = attempt.questionMap ?? {};
   
-  // ONLY process questions that haven't been answered yet
   const order = attempt.questions
     .map(String)
     .filter(id => map[id] && !map[id].answer);
@@ -112,7 +112,8 @@ async function _run(args) {
       quizTitle, index: i, total, q: normQ, correct, incorrect, status: 'asking AI…' 
     });
     
-    const barBuf = await renderEducakeProgress(i, total);
+    // Pass current correct/incorrect to the progress bar text
+    const barBuf = await renderEducakeProgress(i, total, correct, incorrect);
     const progressFile = new AttachmentBuilder(barBuf, { name: 'progress.png' });
 
     await interaction.editReply({
