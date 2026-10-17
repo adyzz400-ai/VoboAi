@@ -45,8 +45,7 @@ export function buildHubEmbed(themeHex) {
     .addFields(
       { name: '📚  Supported platforms', value: supportedBlock(), inline: false },
       { name: '🛠  Controls', value: controlsBlock(), inline: false },
-    )
-    .setTimestamp();
+    );
 }
 
 export function buildHubButtons() {
