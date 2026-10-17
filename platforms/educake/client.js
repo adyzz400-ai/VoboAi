@@ -16,12 +16,11 @@ export class EducakeClient {
     const retryOn401 = opts.retryOn401 !== false;
     const url = path.startsWith('http') ? path : config.educakeBaseUrl + path;
 
-    // No Authorization header. No X-XSRF-TOKEN. The browser session carries
-    // cf_clearance + PHPSESSID + XSRF-TOKEN and fetch(credentials:'include')
-    // sends them automatically — same as the real Educake SPA.
     const headers = {
-      'accept': 'application/json;version=2',
+      'authorization': 'Bearer ' + this.session.jwt,
+      'x-xsrf-token': this.session.xsrf,
       'x-correlation-id': crypto.randomUUID(),
+      'accept': 'application/json;version=2',
     };
 
     log('[client] ' + method + ' ' + path + ' — in-page fetch');
@@ -51,7 +50,7 @@ export class EducakeClient {
           const res = await fetch(args.url, init);
           const text = await res.text();
           let json = null;
-          try { json = text ? JSON.parse(text) : null; } catch (e) { /* not json */ }
+          try { json = text ? JSON.parse(text) : null; } catch (e) {}
           return { status: res.status, ok: res.ok, text: text, json: json };
         } catch (err) {
           return { status: 0, ok: false, text: 'evaluate-error: ' + err.message, json: null };
