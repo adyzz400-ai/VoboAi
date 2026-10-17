@@ -109,10 +109,13 @@ async function _run(args) {
     const barBuf = await renderEducakeProgress(i, total, correct, incorrect);
     const progressFile = new AttachmentBuilder(barBuf, { name: 'progress.png' });
 
-    embeds: [embed],
+    const askPayload = {
+      embeds: [embed],
       files: [progressFile],
-      components: [runningButtons()],
-    }).catch(function() {});
+      components: [runningButtons()]
+    };
+
+    await interaction.editReply(askPayload).catch(function() {});
 
     let geminiResp = null;
     let geminiFailed = false;
@@ -134,7 +137,8 @@ async function _run(args) {
       errEmbed.setAuthor({ name: 'Vobo AI · halted' });
       errEmbed.setDescription('❌ Gemini API rate limit reached or all models failed.\nStopping run to prevent submitting wrong answers.');
       
-      await interaction.editReply({ embeds: [errEmbed], components: [] }).catch(function() {});
+      const errPayload = { embeds: [errEmbed], components: [] };
+      await interaction.editReply(errPayload).catch(function() {});
       break; 
     }
 
@@ -159,11 +163,13 @@ async function _run(args) {
       quizTitle, index: i, total, q: normQ, waitUntilUnix, correct, incorrect, status: 'waiting before submit…' 
     });
 
-    await interaction.editReply({
+    const waitPayload = {
       embeds: [waitEmbed],
       files: [progressFile],
-      components: [runningButtons()],
-    }).catch(function() {});
+      components: [runningButtons()]
+    };
+
+    await interaction.editReply(waitPayload).catch(function() {});
 
     const step = 500;
     let waited = 0;
