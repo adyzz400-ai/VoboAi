@@ -1,4 +1,4 @@
-// VER-AUTOCOMPLETER-B
+// VER-AUTOCOMPLETER-FINAL
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { config } from '../../utils/config.js';
 import { log, warn } from '../../utils/logger.js';
@@ -134,8 +134,14 @@ async function _run(args) {
       }
     }
 
-    const minMs = Math.max(1, (session.waits?.min ?? config.waits.min)) * 1000;
-    const maxMs = Math.max(minMs, (session.waits?.max ?? config.waits.max)) * 1000;
+    // Clamp wait times to max 200s to prevent bad session data from hanging the run
+    let minSec = Number(session.waits?.min ?? config.waits.min);
+    let maxSec = Number(session.waits?.max ?? config.waits.max);
+    if (!Number.isFinite(minSec) || minSec < 1 || minSec > 200) minSec = 4;
+    if (!Number.isFinite(maxSec) || maxSec < minSec || maxSec > 200) maxSec = 12;
+
+    const minMs = minSec * 1000;
+    const maxMs = maxSec * 1000;
     const waitMs = minMs + Math.floor(Math.random() * Math.max(0, maxMs - minMs));
     const waitUntilUnix = Math.floor((Date.now() + waitMs) / 1000);
 
