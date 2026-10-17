@@ -65,6 +65,7 @@ export function buildHubButtons() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('hub:start').setLabel('Start').setEmoji('▶').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId('hub:tutorial').setLabel('Tutorial').setEmoji('📖').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('hub:theme').setLabel('Theme').setEmoji('🎨').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('hub:settings').setLabel('Settings').setEmoji('⚙').setStyle(ButtonStyle.Secondary),
   );
 }
