@@ -12,7 +12,6 @@ function client() {
   return genAI;
 }
 
-// Fallback chain: try the best model first, then drop to older stable ones.
 const MODEL_CHAIN = [
   'gemini-3.8-flash',
   'gemini-1.5-flash',
@@ -20,17 +19,31 @@ const MODEL_CHAIN = [
 ];
 
 const SYSTEM_RULE = (q) => {
+  let prompt = '';
   if (q.kind === 'multiple_choice') {
-    return `Answer the multiple-choice question. Reply with ONLY the exact text of one of the provided choices, verbatim. No explanation, no punctuation around it, no quotes.\n\nChoices:\n- ${q.choices.join('\n- ')}`;
+    prompt = `Answer the multiple-choice question. Reply with ONLY the exact text of one of the provided choices, verbatim. No explanation, no punctuation around it, no quotes.\n\nChoices:\n- ${q.choices.join('\n- ')}`;
+  } else if (q.kind === 'number') {
+    prompt = `Answer the question. Reply with ONLY the numeric value${q.unit ? ` (in ${q.unit})` : ''}. No units, no explanation, no extra characters.`;
+  } else {
+    prompt = `Answer the question. Reply with ONLY the shortest exact answer string (a word or short phrase). Do not write full sentences. No explanation, no punctuation around it, no quotes.`;
   }
-  if (q.kind === 'number') {
-    return `Answer the question. Reply with ONLY the numeric value${q.unit ? ` (in ${q.unit})` : ''}. No units, no explanation, no extra characters.`;
+
+  if (q.image) {
+    prompt += `\n\nCRITICAL INSTRUCTION: This question has an image attached. You MUST carefully analyze the image to find the answer. Do not guess.`;
   }
-  return `Answer the question. Reply with ONLY the shortest exact answer string (a word or short phrase). Do not write full sentences. No explanation, no punctuation around it, no quotes.`;
+  return prompt;
 };
 
 async function fetchImageAsInline(url, session) {
   try {
+    log(`[gemini] Fetching image: ${url}`);
+    
+    // Convert relative URL to absolute if needed
+    let absoluteUrl = url;
+    if (url.startsWith('/')) {
+      absoluteUrl = 'https://my.educake.co.uk' + url;
+    }
+
     const b64 = await session.page.evaluate(async (u) => {
       const res = await fetch(u, { credentials: 'include' });
       if (!res.ok) return null;
@@ -39,15 +52,28 @@ async function fetchImageAsInline(url, session) {
       let bin = '';
       for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
       return btoa(bin);
-    }, url);
-    if (!b64) return null;
+    }, absoluteUrl);
+
+    if (!b64) {
+      warn(`[gemini] Failed to fetch image data: ${absoluteUrl}`);
+      return null;
+    }
     
     let mime = 'image/jpeg';
-    if (url.toLowerCase().endsWith('.png')) mime = 'image/png';
+    if (absoluteUrl.toLowerCase().endsWith('.png')) mime = 'image/png';
     
+    // If it's an SVG, we can't send it as inline image data directly to Gemini.
+    // We'll convert it to a data URI string and pass it as text if needed, 
+    // but for now, we'll label it as png if we have to, though it might fail.
+    if (absoluteUrl.toLowerCase().endsWith('.svg')) {
+        log(`[gemini] SVG detected. Gemini inlineData doesn't support SVG well.`);
+        // Note: Ideally we would use a canvas library to convert SVG to PNG here.
+    }
+
+    log(`[gemini] Image successfully fetched and attached (${mime}).`);
     return { inlineData: { data: b64, mimeType: mime } };
   } catch (err) {
-    log(`[gemini] image fetch failed for ${url}: ${err.message}`);
+    warn(`[gemini] image fetch failed for ${url}: ${err.message}`);
     return null;
   }
 }
@@ -67,7 +93,11 @@ export async function getAIanswer(q, session, { model = config.geminiDefault } =
 
   if (q.image) {
     const inline = await fetchImageAsInline(q.image, session);
-    if (inline) parts.push(inline);
+    if (inline) {
+      parts.push(inline);
+    } else {
+      warn('[gemini] Proceeding without image because fetch failed.');
+    }
   }
 
   for (let i = 0; i < chain.length; i++) {
@@ -77,17 +107,14 @@ export async function getAIanswer(q, session, { model = config.geminiDefault } =
         const raw = await callOnce(m, parts);
         const text = raw.replace(/^["'`]+|["'`]+$/g, '').trim();
         if (text) {
-          log(`[gemini] Success with model: ${m}`);
+          log(`[gemini] Success with model: ${m} -> "${text}"`);
           return { answer: text, model: m };
         }
       } catch (err) {
         const status = err?.status ?? err?.response?.status;
-        const is503 = /503|overload|high demand/i.test(err.message || '');
         warn(`[gemini] ${m} attempt ${attempt + 1} failed (${status ?? '?'}): ${err.message.slice(0, 120)}`);
-        
         if (status === 404) break; 
-        
-        if (is503 || status === 429) { 
+        if (status === 503 || status === 429) { 
           await sleep(1000 * (attempt + 1)); 
           continue; 
         }
