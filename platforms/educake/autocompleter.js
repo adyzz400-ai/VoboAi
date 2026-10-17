@@ -1,5 +1,5 @@
 // language: JavaScript (ESM), file: platforms/educake/autocompleter.js
-import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } from 'discord.js';
 import { config } from '../../utils/config.js';
 import { log, warn } from '../../utils/logger.js';
 import { sleep } from '../../utils/formatTime.js';
@@ -7,6 +7,7 @@ import { submitAnswer } from './quizzes.js';
 import { coerceGivenAnswer } from './parser.js';
 import { getAIanswer } from './getAIanswer.js';
 import { getTheme } from '../../hub/sessionStore.js';
+import { renderEducakeProgress } from './progress.js';
 
 function buildProgressEmbed(accent, opts) {
   const e = new EmbedBuilder();
@@ -102,8 +103,13 @@ async function _run(args) {
       quizTitle, index: i, total, q: normQ, correct, incorrect, status: 'asking AI…' 
     });
     
+    // Generate the PNG
+    const barBuf = await renderEducakeProgress(i, total);
+    const progressFile = new AttachmentBuilder(barBuf, { name: 'progress.png' });
+
     await interaction.editReply({
       embeds: [embed],
+      files: [progressFile],
       components: [runningButtons()],
     }).catch(function() {});
 
@@ -151,6 +157,7 @@ async function _run(args) {
 
     await interaction.editReply({
       embeds: [waitEmbed],
+      files: [progressFile], // Re-use the same buffer so Discord doesn't re-upload it
       components: [runningButtons()],
     }).catch(function() {});
 
