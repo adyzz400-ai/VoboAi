@@ -14,13 +14,16 @@ function buildProgressEmbed(accent, opts) {
   e.setColor(accent);
   e.setAuthor({ name: 'Vobo AI · running' });
   
-  const pct = Math.round(((opts.correct + opts.incorrect) / opts.total) * 100) || 0;
+  // FIXED: opts.index is now the remaining index (0 to remainingTotal)
+  const currentNum = opts.index + 1;
+  const remainingTotal = opts.total;
+
+  const pct = Math.round((opts.correct / (opts.correct + opts.incorrect + (remainingTotal - currentNum))) * 100) || 0;
   
-  // Format the text exactly like the reference
-  const progressText = '**' + (opts.index + 1) + '. Question ' + (opts.index + 1) + '** `' + pct + '%`';
+  const progressText = '**' + currentNum + '. Question ' + currentNum + '** `' + pct + '%`';
   
   e.addFields(
-    { name: 'Progress', value: progressText },
+    { name: 'Progress', value: progressText + ' (of ' + remainingTotal + ' remaining)' },
     { name: 'Current', value: (opts.q?.prompt || '—').slice(0, 280) || '—' }
   );
   
@@ -30,24 +33,15 @@ function buildProgressEmbed(accent, opts) {
   
   const scoreVal = '✓ ' + opts.correct + ' correct   ✗ ' + opts.incorrect + ' incorrect';
   e.addFields({ name: 'Score so far', value: scoreVal });
-
-  // This places the smooth bar inside the embed
-  e.setImage('attachment://progress.png');
   
-  if (opts.status) {
-    e.setFooter({ text: opts.status });
-  }
+  e.setImage('attachment://progress.png');
+  if (opts.status) e.setFooter({ text: opts.status });
   
   return e;
 }
 
 function runningButtons() {
-  const btn = new ButtonBuilder();
-  btn.setCustomId('edu:cancel');
-  btn.setLabel('Cancel');
-  btn.setEmoji('⛔');
-  btn.setStyle(ButtonStyle.Danger);
-  
+  const btn = new ButtonBuilder().setCustomId('edu:cancel').setLabel('Cancel').setEmoji('⛔').setStyle(ButtonStyle.Danger);
   const row = new ActionRowBuilder();
   row.addComponents(btn);
   return row;
@@ -58,7 +52,6 @@ export async function runAttempt(args) {
     return await _run(args);
   } catch (err) {
     log('[run] CRASHED: ' + err.message);
-    log(err.stack);
     throw err;
   }
 }
@@ -77,6 +70,8 @@ async function _run(args) {
   const accent = parseInt(hex.replace('#', ''), 16);
 
   const map = attempt.questionMap || {};
+  
+  // Filter ONLY unanswered questions
   const order = attempt.questions.map(String).filter(id => map[id] && !map[id].answer);
   const total = order.length;
   
@@ -108,7 +103,7 @@ async function _run(args) {
 
     log('[run] Q' + (i+1) + '/' + total + ' asking Gemini...');
     
-    // Render the smooth green/black pill
+    // Render the progress bar based on remaining questions
     const barBuf = await renderSenAIProgressBar(i + 1, total, correct);
     const progressFile = new AttachmentBuilder(barBuf, { name: 'progress.png' });
 
@@ -116,53 +111,40 @@ async function _run(args) {
       quizTitle, index: i, total, q: normQ, correct, incorrect, status: 'asking AI…' 
     });
 
-    const askPayload = {
+    await interaction.editReply({
       embeds: [embed],
       files: [progressFile],
       components: [runningButtons()]
-    };
-
-    await interaction.editReply(askPayload).catch(function() {});
+    }).catch(function() {});
 
     let geminiResp = null;
     let geminiFailed = false;
     
-    try { 
-      geminiResp = await getAIanswer(normQ, session, { model: model }); 
-    } catch (err) { 
-      geminiFailed = true; 
-    }
+    try { geminiResp = await getAIanswer(normQ, session, { model: model }); } 
+    catch (err) { geminiFailed = true; }
     
     if (!geminiResp || !geminiResp.answer) geminiFailed = true;
 
     if (geminiFailed) {
-      log('[run] AI failed or rate limited. Aborting loop to prevent bad answers.');
+      log('[run] AI failed. Aborting loop to prevent bad answers.');
       noAnswer += (total - i); 
       
-      const errEmbed = new EmbedBuilder();
-      errEmbed.setColor(0xED4245);
-      errEmbed.setAuthor({ name: 'Vobo AI · halted' });
-      errEmbed.setDescription('❌ **Gemini API rate limit reached.**\nGoogle is limiting requests. Please wait 60 seconds and press Start again.\n\nNo bad answers were submitted.');
+      const errEmbed = new EmbedBuilder().setColor(0xED4245).setAuthor({ name: 'Vobo AI · halted' })
+        .setDescription('❌ **Gemini API rate limit reached.**\nPlease wait 60 seconds and press Start again.\n\nNo bad answers were submitted.');
       
-      const errPayload = { embeds: [errEmbed], components: [] };
-      await interaction.editReply(errPayload).catch(function() {});
+      await interaction.editReply({ embeds: [errEmbed], components: [] }).catch(function() {});
       break; 
     }
 
     let given = coerceGivenAnswer(normQ, geminiResp.answer);
-    if (!given) {
-      given = geminiResp.answer; 
-    }
+    if (!given) given = geminiResp.answer; 
 
     let minSec = Number(session.waits?.min || config.waits.min);
     let maxSec = Number(session.waits?.max || config.waits.max);
-    
     if (minSec < 8) minSec = 8;
     if (maxSec < 15) maxSec = 15;
 
-    const minMs = minSec * 1000;
-    const maxMs = maxSec * 1000;
-    const waitMs = minMs + Math.floor(Math.random() * Math.max(0, maxMs - minMs));
+    const waitMs = (minSec * 1000) + Math.floor(Math.random() * Math.max(0, (maxSec * 1000) - (minSec * 1000)));
     const waitUntilUnix = Math.floor((Date.now() + waitMs) / 1000);
 
     log('[run] Q' + (i+1) + ' waiting ' + Math.round(waitMs/1000) + 's');
@@ -170,20 +152,17 @@ async function _run(args) {
       quizTitle, index: i, total, q: normQ, waitUntilUnix, correct, incorrect, status: 'waiting before submit…' 
     });
 
-    const waitPayload = {
+    await interaction.editReply({
       embeds: [waitEmbed],
       files: [progressFile],
       components: [runningButtons()]
-    };
+    }).catch(function() {});
 
-    await interaction.editReply(waitPayload).catch(function() {});
-
-    const step = 500;
     let waited = 0;
     while (waited < waitMs) {
       if (signal.cancelled) break;
-      await sleep(Math.min(step, waitMs - waited));
-      waited += step;
+      await sleep(Math.min(500, waitMs - waited));
+      waited += 500;
     }
     if (signal.cancelled) break;
 
@@ -196,9 +175,7 @@ async function _run(args) {
         variantId: q.id,
         givenAnswer: given,
       });
-    } catch (err) { 
-      warn('[run] Q' + (i + 1) + ' submit failed: ' + err.message); 
-    }
+    } catch (err) { warn('[run] submit failed: ' + err.message); }
 
     const isCorrect = res && res.result === true;
     const inReview = res && res.inReview === true;
@@ -214,9 +191,7 @@ async function _run(args) {
   }
 
   if (!signal.cancelled && noAnswer === 0) {
-    try {
-      await finishQuiz(session, attemptId);
-    } catch (e) {}
+    try { await finishQuiz(session, attemptId); } catch (e) {}
   }
 
   return {
