@@ -21,20 +21,45 @@ export async function listQuizzes(session, opts = {}) {
 
 function normalizeQuiz(a) {
   return {
-    attemptId: a.id, assessmentId: a.assessmentId, title: a.name, subject: a.displaySubject,
-    course: a.course, dueDate: a.dueDate, startDate: a.startDate, questionCount: a.questionCount,
-    answerCount: a.answerCount, correctCount: a.correctCount, status: a.status,
-    overdue: a.overdue, isRetake: a.isRetake, isArchived: a.isArchived, setterName: a.setterName, testType: a.testType,
+    attemptId: a.id,
+    assessmentId: a.assessmentId,
+    title: a.name,
+    subject: a.displaySubject,
+    course: a.course,
+    dueDate: a.dueDate,
+    startDate: a.startDate,
+    questionCount: a.questionCount,
+    answerCount: a.answerCount,
+    correctCount: a.correctCount,
+    status: a.status,
+    overdue: a.overdue,
+    isRetake: a.isRetake,
+    isArchived: a.isArchived,
+    setterName: a.setterName,
+    testType: a.testType,
   };
 }
 
 export async function openAttempt(session, attemptId) {
+  if (!attemptId) throw new Error('openAttempt: attemptId is required');
   const client = new EducakeClient(session.page, session);
   const raw = await client.get('/api/student/quiz/' + attemptId);
-  const attempts = raw?.attempt ?? {};
-  const attemptIdStr = Object.keys(attempts)[0];
-  if (!attemptIdStr) throw new Error('openAttempt: no attempt returned for id ' + attemptId);
-  return { attemptId: Number(attemptIdStr), attempt: attempts[attemptIdStr] };
+  
+  if (!raw || !raw.attempt) {
+    throw new Error('openAttempt: response did not contain an attempt object.');
+  }
+
+  const attemptIdStr = Object.keys(raw.attempt)[0];
+  if (!attemptIdStr) {
+    throw new Error('openAttempt: no attempt returned for id ' + attemptId);
+  }
+
+  const attempt = raw.attempt[attemptIdStr];
+  if (!attempt.questionMap || !attempt.questions) {
+    throw new Error('openAttempt: attempt is missing questionMap or questions.');
+  }
+
+  return { attemptId: Number(attemptIdStr), attempt: attempt };
 }
 
 export async function submitAnswer(session, args) {
@@ -47,11 +72,9 @@ export async function submitAnswer(session, args) {
 export async function finishQuiz(session, attemptId) {
   const client = new EducakeClient(session.page, session);
   try {
-    // Educake's actual finish endpoint
     const raw = await client.post('/api/attempt/' + attemptId + '/finish', {});
     return raw ?? { finished: true };
   } catch (err) {
-    // fallback if the endpoint changes
     return { finished: false, note: 'finish endpoint returned ' + (err.status ?? '?') };
   }
 }
