@@ -31,7 +31,7 @@ async function refreshPanel(interaction) {
   }
 }
 
- validWaits(min, max) {
+function validWaits(min, max) {
   if (!Number.isFinite(min)) return false;
   if (!Number.isFinite(max)) return false;
   if (min < 1) return false;
