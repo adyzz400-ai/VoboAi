@@ -12,8 +12,7 @@ function client() {
   return genAI;
 }
 
-// Primary model + fallbacks, tried in order on overload.
-const MODEL_CHAIN = ['gemini-3.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+const MODEL_CHAIN = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-pro'];
 
 const SYSTEM_RULE = (q) => {
   if (q.kind === 'multiple_choice') {
@@ -22,7 +21,7 @@ const SYSTEM_RULE = (q) => {
   if (q.kind === 'number') {
     return `Answer the question. Reply with ONLY the numeric value${q.unit ? ` (in ${q.unit})` : ''}. No units, no explanation, no extra characters.`;
   }
-  return `Answer the question. Reply with ONLY the shortest exact answer string (a word or short phrase). No explanation, no punctuation around it, no quotes.`;
+  return `Answer the question. Reply with ONLY the shortest exact answer string (a word or short phrase). Do not write full sentences. No explanation, no punctuation around it, no quotes.`;
 };
 
 async function fetchImageAsInline(url, session) {
@@ -37,7 +36,15 @@ async function fetchImageAsInline(url, session) {
       return btoa(bin);
     }, url);
     if (!b64) return null;
-    const mime = url.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+    
+    // Handle SVG which Gemini doesn't natively support as inlineData
+    let mime = 'image/jpeg';
+    if (url.toLowerCase().endsWith('.png')) mime = 'image/png';
+    if (url.toLowerCase().endsWith('.svg')) {
+        // For SVGs, we just send them as text if we can't convert, or skip.
+        // But Educake mostly uses PNG/JPEG.
+        mime = 'image/svg+xml'; 
+    }
     return { inlineData: { data: b64, mimeType: mime } };
   } catch (err) {
     log(`[gemini] image fetch failed for ${url}: ${err.message}`);
@@ -73,8 +80,8 @@ export async function getAIanswer(q, session, { model = config.geminiDefault } =
         const status = err?.status ?? err?.response?.status;
         const is503 = /503|overload|high demand/i.test(err.message || '');
         warn(`[gemini] ${m} attempt ${attempt + 1} failed (${status ?? '?'}): ${err.message.slice(0, 120)}`);
-        if (is503 || status === 429) { await sleep(600 * (attempt + 1)); continue; }
-        break; // non-retryable for this model — move to next in chain
+        if (is503 || status === 429) { await sleep(1000 * (attempt + 1)); continue; }
+        break; 
       }
     }
   }
