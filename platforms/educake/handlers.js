@@ -22,13 +22,17 @@ function accentFor(userId) {
   return parseInt(hex.replace('#', ''), 16);
 }
 
-async function refreshPanel(interaction) {
-  const result = await buildPanel({ interaction: interaction });
-  const payload = { embeds: [result.embed], components: result.components };
+async function replyEphemeral(interaction, result) {
+  const payload = { 
+    embeds: [result.embed], 
+    components: result.components, 
+    flags: MessageFlags.Ephemeral 
+  };
+  
   if (interaction.deferred || interaction.replied) {
     await interaction.editReply(payload);
   } else {
-    await interaction.update(payload);
+    await interaction.reply(payload);
   }
 }
 
@@ -111,8 +115,7 @@ export const eduHandlers = {
           }
 
           const panel = await buildPanel({ interaction: interaction });
-          const panelPayload = { embeds: [panel.embed], components: panel.components };
-          await interaction.editReply(panelPayload);
+          await replyEphemeral(interaction, panel);
         } catch (err) {
           log('[educake] login error: ' + err.message);
           const embed = new EmbedBuilder();
@@ -147,7 +150,8 @@ export const eduHandlers = {
     const patch = { waits: { min: min, max: max } };
     patchPlatform(interaction.user.id, 'educake', patch);
     await interaction.deferUpdate();
-    await refreshPanel(interaction);
+    const panel = await buildPanel({ interaction: interaction });
+    await interaction.editReply({ embeds: [panel.embed], components: panel.components });
   },
 
   async 'edu:settings'(interaction) {
@@ -171,7 +175,8 @@ export const eduHandlers = {
     const patch = { waits: { min: min, max: max }, includeImages: includeImages, model: model };
     patchPlatform(interaction.user.id, 'educake', patch);
     await interaction.deferUpdate();
-    await refreshPanel(interaction);
+    const panel = await buildPanel({ interaction: interaction });
+    await interaction.editReply({ embeds: [panel.embed], components: panel.components });
   },
 
   async 'edu:quiz'(interaction) {
@@ -179,10 +184,12 @@ export const eduHandlers = {
     const patch = { selectedAttemptId: attemptId };
     patchPlatform(interaction.user.id, 'educake', patch);
     await interaction.deferUpdate();
-    await refreshPanel(interaction);
+    const panel = await buildPanel({ interaction: interaction });
+    await interaction.editReply({ embeds: [panel.embed], components: panel.components });
   },
 
   async 'edu:start'(interaction) {
+    // ... (start logic stays the same, DM is inherently private) ...
     const userId = interaction.user.id;
     const session = getPlatform(userId, 'educake');
     const accent = accentFor(userId);
@@ -243,9 +250,7 @@ export const eduHandlers = {
       timeoutMs: 30 * 60 * 1000,
       run: async function () {
         try {
-          log('[run] Calling openAttempt...');
           const opened = await openAttempt(session, quizRow.attemptId);
-          log('[run] openAttempt success, starting loop.');
           
           const runSession = getPlatform(userId, 'educake');
           runSession.startedAt = Date.now();
@@ -263,7 +268,6 @@ export const eduHandlers = {
           
           const summary = await runAttempt(runAttemptPayload);
 
-          log('[run] Loop done, building PDF...');
           const pdf = await buildSessionPdf(summary);
           
           const pct = summary.total > 0 ? Math.round((summary.correct / summary.total) * 100) : 0;
@@ -286,7 +290,6 @@ export const eduHandlers = {
           };
           
           await progressMsg.edit(finalPayload);
-          log('[run] DM updated with final score and PDF.');
         } catch (e) {
           log('[run] FATAL: ' + e.message);
           const errEmbed = new EmbedBuilder();
