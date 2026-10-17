@@ -15,13 +15,14 @@ const roundRect = (ctx, x, y, w, h, r) => {
 
 export function renderProgressBar(opts) {
   try {
-    const width = opts.width || 440;
-    const height = opts.height || 32;
-    const radius = opts.radius || 16;
-    const accent = opts.accent || '#00A8E1';
-    const track = opts.track || '#1E3A4C';
+    // Thick dimensions to match SenAI
+    const width = opts.width || 460;
+    const height = opts.height || 28;
+    const radius = opts.radius || 14;
+    
+    const accent = opts.accent || '#4C8DFF'; // SenAI bright blue
+    const track = opts.track || '#2B2D31';
     const bg = opts.bg || 'transparent';
-    const label = opts.label || null;
     
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
@@ -31,12 +32,12 @@ export function renderProgressBar(opts) {
       ctx.fillRect(0, 0, canvas.width, canvas.height); 
     }
 
-    // Draw full track
+    // 1. Dark Track
     ctx.fillStyle = track;
     roundRect(ctx, 0, 0, width, height, radius);
     ctx.fill();
 
-    // Draw fill
+    // 2. Colored Fill
     const filled = opts.filled || 0;
     const total = opts.total || 1;
     const ratio = total > 0 ? Math.max(0, Math.min(1, filled / total)) : 0;
@@ -51,20 +52,11 @@ export function renderProgressBar(opts) {
       ctx.restore();
     }
 
-    // Draw bright inner border
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-    ctx.lineWidth = 2;
-    roundRect(ctx, 1, 1, width - 2, height - 2, radius - 1);
+    // 3. Bright Inner Border (The key to the SenAI look)
+    ctx.strokeStyle = '#8BB4FF'; // Lighter blue border
+    ctx.lineWidth = 3;
+    roundRect(ctx, 1.5, 1.5, width - 3, height - 3, radius - 1.5);
     ctx.stroke();
-
-    // Draw label inside the bar, right-aligned
-    if (label) {
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 14px sans-serif';
-      ctx.textAlign = 'right';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(label, width - 12, height / 2 + 1);
-    }
 
     return canvas.toBuffer('image/png');
   } catch (err) {
