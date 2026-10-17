@@ -27,11 +27,21 @@ register('hub', async (interaction) => {
   if (action === 'start')    return interaction.showModal(buildStartModal());
   if (action === 'settings') return interaction.showModal(buildHubSettingsModal());
   if (action === 'tutorial') return interaction.reply({ embeds: [buildTutorialEmbed()], flags: MessageFlags.Ephemeral });
+  
+  if (action === 'theme') {
+    const hex = getTheme(interaction.user.id);
+    return interaction.reply({ 
+      embeds: [buildHubEmbed(hex)], 
+      components: [buildHubThemeRow(hex)], 
+      flags: MessageFlags.Ephemeral 
+    });
+  }
+  
   if (action === 'back') {
     const hex = getTheme(interaction.user.id);
     return interaction.update({ 
       embeds: [buildHubEmbed(hex)], 
-      components: [buildHubButtons(), buildHubThemeRow(hex)] 
+      components: [buildHubButtons()] 
     });
   }
   warn(`[hub] unhandled action ${action}`);
@@ -79,10 +89,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const hex = interaction.values[0];
         setTheme(interaction.user.id, hex);
         
-        // Update the hub message IN PLACE with the new color
+        // Update the theme picker message in place
         await interaction.update({
           embeds: [buildHubEmbed(hex)],
-          components: [buildHubButtons(), buildHubThemeRow(hex)]
+          components: [buildHubThemeRow(hex)]
         });
         log(`[theme] ${interaction.user.id} -> #${hex}`);
         return;
