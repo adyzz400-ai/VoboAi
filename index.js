@@ -89,7 +89,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const hex = interaction.values[0];
         setTheme(interaction.user.id, hex);
         
-        // Update the theme picker message in place
+        // Update the theme picker message in place (ephemeral)
         await interaction.update({
           embeds: [buildHubEmbed(hex)],
           components: [buildHubThemeRow(hex)]
