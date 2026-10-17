@@ -8,6 +8,7 @@ const ACCENT = parseInt(config.accent.replace('#', ''), 16);
 export async function handleStartModal(interaction) {
   const value = interaction.fields.getTextInputValue('platform').trim().toLowerCase();
   const platform = resolvePlatformFromLoginValue(value);
+  
   if (!platform) {
     return interaction.reply({
       flags: MessageFlags.Ephemeral,
@@ -15,7 +16,11 @@ export async function handleStartModal(interaction) {
         .setDescription(`Unknown platform \`${value}\`.\nValid: \`${VALID_LOGIN_VALUES.join('`, `')}\``)],
     });
   }
+  
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  const { embed, components } = await platform.panel({ interaction, loginVariant: value });
-  await interaction.editReply({ embeds: [embed], components });
+  
+  // buildPanel now returns { components: [ContainerBuilder] } instead of an embed
+  const panel = await platform.panel({ interaction, loginVariant: value });
+  
+  await interaction.editReply({ components: panel.components });
 }
