@@ -207,7 +207,6 @@ async function _run(args) {
 
   log('[run] finished all questions, marking quiz complete...');
   
-  // Mark the quiz as complete in Educake
   if (!signal.cancelled) {
     try {
       await finishQuiz(session, attemptId);
