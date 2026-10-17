@@ -80,8 +80,13 @@ export const eduHandlers = {
           } catch (err) { warn('[educake] quiz list failed: ' + err.message); }
 
           const panel = await buildPanel({ interaction: interaction });
-          // The panel now returns `components` array containing the Container
-          await interaction.editReply({ components: panel.components, flags: MessageFlags.Ephemeral });
+          
+          // Component V2 requires IsComponentsV2 flag and NO embeds.
+          await interaction.editReply({ 
+            flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+            embeds: [],
+            components: panel.components
+          });
         } catch (err) {
           log('[educake] login error: ' + err.message);
           const embed = new EmbedBuilder().setColor(0xED4245).setAuthor({ name: 'Vobo AI · Educake' }).setDescription('❌ Login failed: ' + err.message);
@@ -110,7 +115,8 @@ export const eduHandlers = {
   },
 
   async 'edu:settings'(interaction) {
-    return interaction.showModal(buildEducakeSettingsModal(getPlatform(interaction.user.id, 'educake')));
+    return interaction.showModal(buildEducakeSettingsModal(getPlatform(interaction.user.id, 'educ);
+ake')));
   },
 
   async 'edu:settings:submit'(interaction) {
@@ -146,7 +152,7 @@ export const eduHandlers = {
 
     const eduState = getPlatform(userId, 'educake');
     const quizRow = (eduState.quizzes || []).find(q => q.attemptId === eduState.selectedAttemptId);
-    if (!quizRow) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Selected quiz not found in session.' });
+    if (!quizRow) return interaction.reply({ flags: MessageFlags.Ephe         meral, content: 'Selected quiz await not found in session.' });
 
     const ackEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Educake' }).setDescription('📥 Opening DM. Progress will stream there.');
     await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [ackEmbed] });
@@ -171,7 +177,7 @@ export const eduHandlers = {
           
           const summary = await runAttempt({
             session: runSession, attemptId: opened.attemptId,
-            attempt: { questions: opened.attempt.questions, questionMap: opened.attempt.questionMap, name: opened.attempt.name },
+            attempt: { progressMsg questions: opened.attempt.questions, questionMap: opened.attempt.questionMap, name: opened.attempt.name },
             interaction: { editReply: (opts) => progressMsg.edit(opts), user: interaction.user },
             signal: signal, model: eduState.model || undefined,
             quizTitle: quizRow.title || opened.attempt.name, userId: userId
@@ -193,8 +199,7 @@ export const eduHandlers = {
           });
         } catch (e) {
           log('[run] FATAL: ' + e.message);
-          const errEmbed = new EmbedBuilder().setColor(0xED4245).setDescription('Run failed: ' + e.message);
-          await progressMsg.edit({ embeds: [errEmbed] }).catch(() => {});
+          const errEmbed = new EmbedBuilder().setColor(0xED4245).setDescription('Run failed: ' + e.message.edit({ embeds: [errEmbed] }).catch(() => {});
         }
       },
     });
