@@ -7,18 +7,15 @@ import { submitAnswer, finishQuiz } from './quizzes.js';
 import { coerceGivenAnswer } from './parser.js';
 import { getAIanswer } from './getAIanswer.js';
 import { getTheme } from '../../hub/sessionStore.js';
-import { renderEducakeProgress } from './progress.js';
+import { renderSenAIProgressBar } from '../../utils/senaiLayout.js'; // Use the new layout
 
 function buildProgressEmbed(accent, opts) {
   const e = new EmbedBuilder();
   e.setColor(accent);
   e.setAuthor({ name: 'Vobo AI · running' });
   
-  const pct = Math.round(((opts.correct + opts.incorrect) / opts.total) * 100) || 0;
-  
+  // We remove the Quiz and Progress text fields because the image handles them now
   e.addFields(
-    { name: 'Quiz', value: opts.quizTitle || '—' },
-    { name: 'Progress', value: 'Question ' + (opts.index + 1) + ' of ' + opts.total + ' (' + pct + '%)' },
     { name: 'Current', value: (opts.q?.prompt || '—').slice(0, 280) || '—' }
   );
   
@@ -106,7 +103,8 @@ async function _run(args) {
       quizTitle, index: i, total, q: normQ, correct, incorrect, status: 'asking AI…' 
     });
     
-    const barBuf = await renderEducakeProgress(i, total, correct, incorrect);
+    // Render the SenAI style layout (Text + Bar in one PNG)
+    const barBuf = await renderSenAIProgressBar(i + 1, total, correct, incorrect);
     const progressFile = new AttachmentBuilder(barBuf, { name: 'progress.png' });
 
     const askPayload = {
