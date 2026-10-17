@@ -109,8 +109,7 @@ async function _run(args) {
     const barBuf = await renderEducakeProgress(i, total, correct, incorrect);
     const progressFile = new AttachmentBuilder(barBuf, { name: 'progress.png' });
 
-    await interaction.editReply({
-      embeds: [embed],
+    embeds: [embed],
       files: [progressFile],
       components: [runningButtons()],
     }).catch(function() {});
@@ -126,10 +125,9 @@ async function _run(args) {
     
     if (!geminiResp || !geminiResp.answer) geminiFailed = true;
 
-    // FIX: If AI fails, ABORT the loop. Don't guess.
     if (geminiFailed) {
       log('[run] AI failed or rate limited. Aborting loop to prevent bad answers.');
-      noAnswer += (total - i); // Mark remaining as unanswered
+      noAnswer += (total - i); 
       
       const errEmbed = new EmbedBuilder();
       errEmbed.setColor(0xED4245);
@@ -137,19 +135,17 @@ async function _run(args) {
       errEmbed.setDescription('❌ Gemini API rate limit reached or all models failed.\nStopping run to prevent submitting wrong answers.');
       
       await interaction.editReply({ embeds: [errEmbed], components: [] }).catch(function() {});
-      break; // Break out of the loop
+      break; 
     }
 
     let given = coerceGivenAnswer(normQ, geminiResp.answer);
     if (!given) {
-      given = geminiResp.answer; // Fallback to whatever the AI sent
+      given = geminiResp.answer; 
     }
 
-    // Ensure wait times are long enough to avoid rate limits
     let minSec = Number(session.waits?.min ?? config.waits.min);
     let maxSec = Number(session.waits?.max ?? config.waits.max);
     
-    // Enforce minimum 8s wait if we keep hitting 429s
     if (minSec < 8) minSec = 8;
     if (maxSec < 15) maxSec = 15;
 
