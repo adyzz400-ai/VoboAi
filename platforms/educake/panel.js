@@ -1,4 +1,4 @@
-// language: JavaScript (ESM), file: platforms/educake/panel.js
+// VER-PANEL-B
 import {
   EmbedBuilder,
   ActionRowBuilder,
@@ -11,14 +11,15 @@ import { getPlatform, getTheme } from '../../hub/sessionStore.js';
 import { relativeTag, dateOnlyToUnix } from '../../utils/formatTime.js';
 
 function buildQuizSelect(session) {
-  const list = (session.quizzes ?? [])
-    .filter(function (q) { return q.status !== 'completed'; })
-    .filter(function (q) { return !q.isArchived; })
-    .slice(0, 25);
+  const allQuizzes = session.quizzes ?? [];
+  const outstanding = allQuizzes.filter(function (q) {
+    return q.status !== 'completed' && !q.isArchived;
+  });
+  const capped = outstanding.slice(0, 25);
+  if (capped.length === 0) return null;
 
-  if (list.length === 0) return null;
-
-  const opts = list.map(function (q) {
+  const options = [];
+  for (const q of capped) {
     const due = dateOnlyToUnix(q.dueDate);
     let duePart = '';
     if (due) duePart = ' · due ' + relativeTag(due);
@@ -28,18 +29,23 @@ function buildQuizSelect(session) {
     const desc = (subj + ' · ' + count + ' Qs' + duePart).slice(0, 100);
     const value = String(q.attemptId);
     const isDefault = value === String(session.selectedAttemptId ?? '');
-    return new StringSelectMenuOptionBuilder()
-      .setLabel(title)
-      .setDescription(desc)
-      .setValue(value)
-      .setDefault(isDefault);
-  });
+    
+    const opt = new StringSelectMenuOptionBuilder();
+    opt.setLabel(title);
+    opt.setDescription(desc);
+    opt.setValue(value);
+    opt.setDefault(isDefault);
+    options.push(opt);
+  }
 
   const menu = new StringSelectMenuBuilder();
   menu.setCustomId('edu:quiz');
   menu.setPlaceholder('Select a quiz…');
-  menu.addOptions(opts);
-  return new ActionRowBuilder().addComponents(menu);
+  menu.addOptions(options);
+
+  const row = new ActionRowBuilder();
+  row.addComponents(menu);
+  return row;
 }
 
 function buildTimingRow() {
@@ -48,11 +54,16 @@ function buildTimingRow() {
   btn.setLabel('Set wait time');
   btn.setEmoji('🕒');
   btn.setStyle(ButtonStyle.Secondary);
-  return new ActionRowBuilder().addComponents(btn);
+  
+  const row = new ActionRowBuilder();
+  row.addComponents(btn);
+  return row;
 }
 
 function buildControlRow(session) {
   const loggedIn = !!session?.jwt;
+  const hasSelection = !!session?.selectedAttemptId;
+
   const hub = new ButtonBuilder();
   hub.setCustomId('hub:back');
   hub.setLabel('Hub');
@@ -76,23 +87,29 @@ function buildControlRow(session) {
   start.setLabel('Start');
   start.setEmoji('▶');
   start.setStyle(ButtonStyle.Success);
-  start.setDisabled(!loggedIn || !session?.selectedAttemptId);
+  if (!loggedIn || !hasSelection) {
+    start.setDisabled(true);
+  }
 
   const row = new ActionRowBuilder();
   row.addComponents(hub, login, settings, start);
   return row;
 }
 
-export async function buildPanel({ interaction }) {
+export async function buildPanel(args) {
+  const interaction = args.interaction;
   const userId = interaction.user.id;
   const session = getPlatform(userId, 'educake');
-  const ACCENT = parseInt(getTheme(userId).replace('#', ''), 16);
+  const hex = getTheme(userId);
+  const ACCENT = parseInt(hex.replace('#', ''), 16);
 
   const loggedIn = !!session?.jwt;
   const hasQuizzes = Array.isArray(session?.quizzes) && session.quizzes.length > 0;
 
   let statusLine = '○ Not logged in';
-  if (loggedIn) statusLine = '● Logged in as *' + session.username + '*';
+  if (loggedIn) {
+    statusLine = '● Logged in as *' + session.username + '*';
+  }
 
   let statusExtra = 'Connect your Educake account to load quizzes.';
   if (loggedIn && session?.jwtExpUnix) {
@@ -100,9 +117,16 @@ export async function buildPanel({ interaction }) {
   }
 
   let quizLine = 'Log in to see quizzes.';
-  if (loggedIn) quizLine = hasQuizzes ? 'Pick an outstanding quiz to run:' : 'No outstanding quizzes found.';
+  if (loggedIn) {
+    if (hasQuizzes) {
+      quizLine = 'Pick an outstanding quiz to run:';
+    } else {
+      quizLine = 'No outstanding quizzes found.';
+    }
+  }
 
-  const waits = session?.waits ?? { min: 4, max: 12 };
+  let waits = { min: 4, max: 12 };
+  if (session && session.waits) waits = session.waits;
   const waitValue = 'Min: ' + waits.min + 's    Max: ' + waits.max + 's';
 
   const embed = new EmbedBuilder();
@@ -116,9 +140,9 @@ export async function buildPanel({ interaction }) {
 
   const rows = [];
   if (loggedIn && hasQuizzes) {
-    const select = buildQuizSelect(session);
-    if (select) {
-      rows.push(select);
+    const selectRow = buildQuizSelect(session);
+    if (selectRow) {
+      rows.push(selectRow);
       rows.push(buildTimingRow());
     }
   }
