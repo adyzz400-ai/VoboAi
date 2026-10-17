@@ -19,7 +19,7 @@ function buildProgressEmbed(accent, opts) {
   e.addFields(
     { name: 'Quiz', value: opts.quizTitle || '—' },
     { name: 'Progress', value: 'Question ' + (opts.index + 1) + ' of ' + opts.total + ' (' + pct + '%)' },
-    { name: 'Current', value: (opts.q?.prompt ?? '—').slice(0, 280) || '—' }
+    { name: 'Current', value: (opts.q?.prompt || '—').slice(0, 280) || '—' }
   );
   
   if (opts.waitUntilUnix) {
@@ -71,7 +71,7 @@ async function _run(args) {
   const hex = getTheme(userId);
   const accent = parseInt(hex.replace('#', ''), 16);
 
-  const map = attempt.questionMap ?? {};
+  const map = attempt.questionMap || {};
   const order = attempt.questions.map(String).filter(id => map[id] && !map[id].answer);
   const total = order.length;
   
@@ -96,7 +96,7 @@ async function _run(args) {
       testQuestionId: q.testQuestionId,
       kind: q.type === 'multiple' ? 'multiple_choice' : q.type === 'number' ? 'number' : 'short_answer',
       prompt: q.question,
-      choices: q.type === 'multiple' ? (q.choices ?? []) : null,
+      choices: q.type === 'multiple' ? (q.choices || []) : null,
       unit: q.extra || null,
       image: q.image || null,
     };
@@ -135,7 +135,7 @@ async function _run(args) {
       const errEmbed = new EmbedBuilder();
       errEmbed.setColor(0xED4245);
       errEmbed.setAuthor({ name: 'Vobo AI · halted' });
-      errEmbed.setDescription('❌ Gemini API rate limit reached or all models failed.\nStopping run to prevent submitting wrong answers.');
+      errEmbed.setDescription('❌ **Gemini API rate limit reached.**\nGoogle is limiting requests. Please wait 60 seconds and press Start again.\n\nNo bad answers were submitted.');
       
       const errPayload = { embeds: [errEmbed], components: [] };
       await interaction.editReply(errPayload).catch(function() {});
@@ -147,8 +147,8 @@ async function _run(args) {
       given = geminiResp.answer; 
     }
 
-    let minSec = Number(session.waits?.min ?? config.waits.min);
-    let maxSec = Number(session.waits?.max ?? config.waits.max);
+    let minSec = Number(session.waits?.min || config.waits.min);
+    let maxSec = Number(session.waits?.max || config.waits.max);
     
     if (minSec < 8) minSec = 8;
     if (maxSec < 15) maxSec = 15;
@@ -184,7 +184,7 @@ async function _run(args) {
     let res = null;
     try {
       res = await submitAnswer(session, {
-        attemptId,
+        attemptId: attemptId,
         testQuestionId: q.testQuestionId,
         variantId: q.id,
         givenAnswer: given,
@@ -193,16 +193,16 @@ async function _run(args) {
       warn('[run] Q' + (i + 1) + ' submit failed: ' + err.message); 
     }
 
-    const isCorrect = res?.result === true;
-    const inReview = res?.inReview === true;
+    const isCorrect = res && res.result === true;
+    const inReview = res && res.inReview === true;
     if (isCorrect) correct++;
     else if (inReview) unmarked++;
     else incorrect++;
 
     results.push({
-      index: i, prompt: q.question, given, correctAnswers: res?.correctAnswers ?? [],
-      reasoning: res?.reasoning ?? '', result: res?.result ?? null, inReview, type: q.type,
-      unit: q.extra || null, image: q.image || null, geminiFailed,
+      index: i, prompt: q.question, given: given, correctAnswers: (res && res.correctAnswers) || [],
+      reasoning: (res && res.reasoning) || '', result: (res && res.result) || null, inReview: inReview, type: q.type,
+      unit: q.extra || null, image: q.image || null, geminiFailed: geminiFailed,
     });
   }
 
@@ -214,9 +214,9 @@ async function _run(args) {
 
   return {
     quizTitle: quizTitle || attempt.name || 'Educake quiz',
-    total, correct, incorrect, unmarked, noAnswer,
+    total: total, correct: correct, incorrect: incorrect, unmarked: unmarked, noAnswer: noAnswer,
     cancelled: !!signal.cancelled,
-    durationSeconds: Math.floor((Date.now() - (session.startedAt ?? Date.now())) / 1000),
-    results,
+    durationSeconds: Math.floor((Date.now() - (session.startedAt || Date.now())) / 1000),
+    results: results,
   };
 }
