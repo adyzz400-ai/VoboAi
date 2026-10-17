@@ -217,7 +217,3 @@ export const eduHandlers = {
     await interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Cancellation signalled.' });
   },
 };
-
-queue.on('finish', function (task, err) {
-  log(`[queue] finished ${task.id} kind=${task.kind} err=${err ? err.message : 'none'}`);
-});
