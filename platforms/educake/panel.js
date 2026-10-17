@@ -1,14 +1,33 @@
-// VER-PANEL-B
+// language: JavaScript (ESM), file: platforms/educake/panel.js
 import {
-  EmbedBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  StringSelectMenuBuilder,
-  StringSelectMenuOptionBuilder,
+  EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle,
+  StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
 } from 'discord.js';
 import { getPlatform, getTheme } from '../../hub/sessionStore.js';
-import { relativeTag, dateOnlyToUnix } from '../../utils/formatTime.js';
+import { relativeTag } from '../../utils/formatTime.js';
+
+// Helper to format "2026-11-15" -> "Monday 15th November"
+function formatDueDate(dateStr) {
+  if (!dateStr) return '';
+  // Append time to prevent timezone shifting the day backwards
+  const d = new Date(dateStr + 'T12:00:00Z');
+  if (isNaN(d.getTime())) return dateStr;
+
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  
+  const dayName = days[d.getDay()];
+  const dayNum = d.getDate();
+  const monthName = months[d.getMonth()];
+
+  // Add st, nd, rd, th
+  let suffix = 'th';
+  if (dayNum === 1 || dayNum === 21 || dayNum === 31) suffix = 'st';
+  else if (dayNum === 2 || dayNum === 22) suffix = 'nd';
+  else if (dayNum === 3 || dayNum === 23) suffix = 'rd';
+
+  return dayName + ' ' + dayNum + suffix + ' ' + monthName;
+}
 
 function buildQuizSelect(session) {
   const allQuizzes = session.quizzes ?? [];
@@ -20,12 +39,16 @@ function buildQuizSelect(session) {
 
   const options = [];
   for (const q of capped) {
-    const due = dateOnlyToUnix(q.dueDate);
     let duePart = '';
-    if (due) duePart = ' · due ' + relativeTag(due);
+    if (q.dueDate) {
+      duePart = ' · (due: ' + formatDueDate(q.dueDate) + ')';
+    }
+    
     const title = String(q.title || '').slice(0, 100);
     const subj = String(q.subject || '—');
     const count = q.questionCount ?? '?';
+    
+    // e.g. "Biology · 25 Qs · (due: Monday 15th November)"
     const desc = (subj + ' · ' + count + ' Qs' + duePart).slice(0, 100);
     const value = String(q.attemptId);
     const isDefault = value === String(session.selectedAttemptId ?? '');
