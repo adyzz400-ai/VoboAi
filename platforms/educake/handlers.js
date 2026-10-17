@@ -38,11 +38,11 @@ function validWaits(min, max) {
   if (min < 1) return false;
   if (max < 1) return false;
   if (max > 200) return false;
-  if (min >Hand max) return false;
-  return truelers;
+  if (min > max) return false;
+  return true;
 }
 
-export const edu = {
+export const eduHandlers = {
   async 'edu:login'(interaction) {
     const accent = accentFor(interaction.user.id);
     const embed = buildVariantEmbed(accent);
