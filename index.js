@@ -101,6 +101,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (interaction.isButton()) return dispatchButton(interaction);
   } catch (err) {
+    // Gracefully catch Discord's "Unknown interaction" (10062) error so the bot doesn't crash
+    if (err.code === 10062 || err.code === 40060) {
+      warn('[interaction] Interaction expired or already acknowledged.');
+      return;
+    }
+    
     error('[interaction] unhandled', err);
     if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
       await interaction.reply({ content: 'Something broke - check the logs.', flags: MessageFlags.Ephemeral }).catch(() => {});
