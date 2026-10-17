@@ -6,7 +6,7 @@ import { resolvePlatformFromLoginValue, VALID_LOGIN_VALUES } from '../platforms/
 export async function handleStartModal(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const value = interaction.fields.getTextInputValue('platform').trim().toLowerCase();
+  const value = interaction.fields.getTextInputValue().toLowerCase();
   const platform = resolvePlatformFromLoginValue(value);
   
   if (!platform) {
@@ -18,10 +18,8 @@ export async function handleStartModal(interaction) {
   
   try {
     const panel = await platform.panel({ interaction, loginVariant: value });
-    // Send the Component V2 panel with the required flag
     await interaction.editReply({ 
-      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-      embeds: [],
+      embeds: [panel.embed],
       components: panel.components
     });
   } catch (err) {
