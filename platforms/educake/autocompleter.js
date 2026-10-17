@@ -14,9 +14,13 @@ function buildProgressEmbed(accent, opts) {
   e.setColor(accent);
   e.setAuthor({ name: 'Vobo AI · running' });
   
-  e.setDescription('attachment://progress.png');
+  const pct = Math.round(((opts.correct + opts.incorrect) / opts.total) * 100) || 0;
+  
+  // Format the text exactly like the reference
+  const progressText = '**' + (opts.index + 1) + '. Question ' + (opts.index + 1) + '** `' + pct + '%`';
   
   e.addFields(
+    { name: 'Progress', value: progressText },
     { name: 'Current', value: (opts.q?.prompt || '—').slice(0, 280) || '—' }
   );
   
@@ -26,6 +30,9 @@ function buildProgressEmbed(accent, opts) {
   
   const scoreVal = '✓ ' + opts.correct + ' correct   ✗ ' + opts.incorrect + ' incorrect';
   e.addFields({ name: 'Score so far', value: scoreVal });
+
+  // This places the smooth bar inside the embed
+  e.setImage('attachment://progress.png');
   
   if (opts.status) {
     e.setFooter({ text: opts.status });
@@ -101,6 +108,7 @@ async function _run(args) {
 
     log('[run] Q' + (i+1) + '/' + total + ' asking Gemini...');
     
+    // Render the smooth green/black pill
     const barBuf = await renderSenAIProgressBar(i + 1, total, correct);
     const progressFile = new AttachmentBuilder(barBuf, { name: 'progress.png' });
 
