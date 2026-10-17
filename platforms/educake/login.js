@@ -129,18 +129,36 @@ export async function educakeLogin(args) {
     await page.goto(config.educakeBaseUrl + '/my-educake/', { waitUntil: 'networkidle2', timeout: 30_000 }).catch(() => null);
     log('[login] dashboard url: ' + page.url());
 
-    step('verifying authenticated session');
-    const verify = await page.evaluate(async () => {
-      const res = await fetch('https://my.educake.co.uk/api/me', { credentials: 'include' });
+    step('fetching API session token');
+    const tokenRes = await page.evaluate(async () => {
+      const res = await fetch('https://my.educake.co.uk/session-token', { credentials: 'include' });
       const text = await res.text();
       let json = null;
       try { json = text ? JSON.parse(text) : null; } catch (e) {}
-      return { status: res.status, json: json, text: text.slice(0, 200) };
+      return { status: res.status, text: text.slice(0, 300), json: json };
     });
-    log('[login] /api/me → ' + verify.status);
-    if (verify.status !== 200) {
-      throw new Error('Session verify failed: ' + verify.status + ' — ' + verify.text);
+
+    log('[login] /session-token → ' + tokenRes.status + ' — ' + tokenRes.text);
+
+    if (tokenRes.status !== 200) {
+      throw new Error('Session token request failed: ' + tokenRes.status);
     }
+
+    let jwt = null;
+    if (tokenRes.json) {
+      jwt = tokenRes.json.accessToken || tokenRes.json.access_token ||
+            tokenRes.json.sessionToken || tokenRes.json.session_token ||
+            tokenRes.json.token || tokenRes.json.jwt;
+    }
+    if (!jwt && typeof tokenRes.text === 'string' && tokenRes.text.startsWith('eyJ')) {
+      jwt = tokenRes.text.trim();
+    }
+
+    if (!jwt) {
+      throw new Error('Could not find JWT in /session-token response');
+    }
+
+    log('[login] JWT extracted from /session-token');
 
     const cookies = await page.cookies();
     const jar = Object.fromEntries(cookies.map(c => [c.name, c.value]));
@@ -156,6 +174,7 @@ export async function educakeLogin(args) {
       password: password,
       cookies: jar,
       xsrf: xsrf,
+      jwt: jwt,
       baseUrl: config.educakeBaseUrl,
       capturedAt: Date.now(),
       jwtExpUnix: Math.floor(Date.now() / 1000) + 3600,
