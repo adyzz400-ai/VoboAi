@@ -12,10 +12,10 @@ function client() {
   return genAI;
 }
 
+// Based on your key's rate limits, 3.5-flash-lite is the best balance of vision + limits (15 RPM, 500 RPD)
 const MODEL_CHAIN = [
-  'gemini-3.8-flash',
-  'gemini-2.0-flash',
-  'gemini-1.5-flash-latest'
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-flash-lite'
 ];
 
 const SYSTEM_RULE = (q) => {
@@ -76,8 +76,6 @@ async function callOnce(model, parts) {
   return (res.response.text() || '').trim();
 }
 
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
 export async function getAIanswer(q, session, opts) {
   const model = (opts && opts.model) ? opts.model : config.geminiDefault;
   const chain = [model, ...MODEL_CHAIN.filter(m => m !== model)];
@@ -88,14 +86,12 @@ export async function getAIanswer(q, session, opts) {
     const inline = await fetchImageAsInline(q.image, session);
     if (inline) {
       parts.push(inline);
-    } else {
-      warn('[gemini] Proceeding without image because fetch failed.');
     }
   }
 
   for (let i = 0; i < chain.length; i++) {
     const m = chain[i];
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const raw = await callOnce(m, parts);
         const text = raw.replace(/^["'`]+|["'`]+$/g, '').trim();
@@ -108,9 +104,8 @@ export async function getAIanswer(q, session, opts) {
         warn('[gemini] ' + m + ' failed (' + (status || '?') + ')');
         
         if (status === 404) break; 
-        
         if (status === 503 || status === 429) { 
-          await sleep(5000 * (attempt + 1)); 
+          await new Promise(r => setTimeout(r, 15000)); 
           continue; 
         }
         break; 
