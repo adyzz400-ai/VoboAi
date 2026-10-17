@@ -6,17 +6,22 @@ export function buildStartModal() {
   const options = Object.values(PLATFORMS)
     .filter(p => p.available)
     .flatMap(p => p.loginVariants.filter(v => v.available).map(v => v.id));
-
-  const input = new TextInputBuilder()
-    .setCustomId('platform')
-    .setLabel('Platform')
-    .setPlaceholder(options.join(' · '))
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true)
-    .setMaxLength(32);
-
-  return new ModalBuilder()
-    .setCustomId('hub:start:submit')
-    .setTitle('Start a run')
-    .addComponents(new ActionRowBuilder().addComponents(input));
+  
+  const input = new TextInputBuilder();
+  input.setCustomId('platform');
+  input.setLabel('Platform');
+  input.setPlaceholder(options.join(' · '));
+  input.setStyle(TextInputStyle.Short);
+  input.setRequired(true);
+  input.setMaxLength(32);
+  
+  const row = new ActionRowBuilder();
+  row.addComponents(input);
+  
+  const modal = new ModalBuilder();
+  modal.setCustomId('hub:start:submit');
+  modal.setTitle('Start a run');
+  modal.addComponents(row);
+  
+  return modal;
 }
