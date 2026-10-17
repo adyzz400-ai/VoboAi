@@ -26,16 +26,6 @@ function supportedBlock() {
   }).join('\n');
 }
 
-function howItWorksBlock() {
-  return [
-    '**1.** Press **Start** below and choose your platform.',
-    '**2.** Log in through a secure popup - nothing is stored in chat.',
-    '**3.** Pick which quiz you want to run from the live dropdown.',
-    '**4.** Press **Start** on the panel and watch progress stream in real time.',
-    '**5.** Get your PDF summary in DMs the moment it finishes.',
-  ].join('\n');
-}
-
 function controlsBlock() {
   return [
     '**▶ Start** - begin a new run',
@@ -54,10 +44,8 @@ export function buildHubEmbed(themeHex) {
     .setDescription(hubDescription())
     .addFields(
       { name: '📚  Supported platforms', value: supportedBlock(), inline: false },
-      { name: '🚀  How it works', value: howItWorksBlock(), inline: false },
       { name: '🛠  Controls', value: controlsBlock(), inline: false },
     )
-    .setFooter({ text: 'Vobo AI · v0.1 · sessions in-memory only · my.educake.co.uk' })
     .setTimestamp();
 }
 
