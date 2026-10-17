@@ -1,4 +1,4 @@
-// VER-AUTOCOMPLETER-FINAL
+// language: JavaScript (ESM), file: platforms/educake/autocompleter.js
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { config } from '../../utils/config.js';
 import { log, warn } from '../../utils/logger.js';
@@ -134,7 +134,6 @@ async function _run(args) {
       }
     }
 
-    // Clamp wait times to max 200s to prevent bad session data from hanging the run
     let minSec = Number(session.waits?.min ?? config.waits.min);
     let maxSec = Number(session.waits?.max ?? config.waits.max);
     if (!Number.isFinite(minSec) || minSec < 1 || minSec > 200) minSec = 4;
