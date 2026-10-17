@@ -1,4 +1,54 @@
-async 'edu:login:submit'(interaction) {
+// language: JavaScript (ESM), file: platforms/educake/handlers.js
+import { EmbedBuilder, MessageFlags, AttachmentBuilder } from 'discord.js';
+import { log, warn } from '../../utils/logger.js';
+import { getPlatform, setPlatform, patchPlatform, getTheme } from '../../hub/sessionStore.js';
+import { buildPanel } from './panel.js';
+import { buildEducakeLoginModal } from './loginModal.js';
+import { buildTimingModal } from './timingModal.js';
+import { buildEducakeSettingsModal } from './settingsModal.js';
+import { buildVariantEmbed, buildVariantSelect } from './variantPicker.js';
+import { educakeLogin } from './login.js';
+import { listQuizzes, openAttempt } from './quizzes.js';
+import { runAttempt } from './autocompleter.js';
+import { buildSessionPdf } from './pdf.js';
+import { queue } from '../../queue/index.js';
+import { Task } from '../../queue/task.js';
+import { config } from '../../utils/config.js';
+import { jwtExpiryMs } from './auth.js';
+
+function accentFor(userId) {
+  return parseInt(getTheme(userId).replace('#', ''), 16);
+}
+
+function validWaits(min, max) {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min < 1 || max < 1 || max > 200 || min > max) return false;
+  return true;
+}
+
+export const eduHandlers = {
+  async 'edu:login'(interaction) {
+    const accent = accentFor(interaction.user.id);
+    const embed = buildVariantEmbed(accent);
+    const select = buildVariantSelect();
+    return interaction.reply({ 
+      flags: MessageFlags.Ephemeral, 
+      embeds: [embed], 
+      components: [select] 
+    });
+  },
+
+  async 'edu:login:variant'(interaction) {
+    const choice = interaction.values[0];
+    if (choice !== 'educake') {
+      let label = choice === 'educake-ms' ? 'Microsoft' : 'Google';
+      const embed = new EmbedBuilder().setColor(0xEAB308).setAuthor({ name: 'Vobo AI · Educake' }).setDescription('**' + label + ' login** is coming soon.');
+      return interaction.update({ embeds: [embed], components: [] });
+    }
+    const modal = buildEducakeLoginModal();
+    return interaction.showModal(modal);
+  },
+
+  async 'edu:login:submit'(interaction) {
     const username = interaction.fields.getTextInputValue('username').trim();
     const password = interaction.fields.getTextInputValue('password');
     const accent = accentFor(interaction.user.id);
@@ -34,7 +84,6 @@ async 'edu:login:submit'(interaction) {
 
           const panel = await buildPanel({ interaction: interaction });
           
-          // V1 editReply
           await interaction.editReply({ 
             embeds: [panel.embed],
             components: panel.components
@@ -49,11 +98,17 @@ async 'edu:login:submit'(interaction) {
     queue.enqueue(task);
   },
 
+  async 'edu:timing'(interaction) {
+    const session = getPlatform(interaction.user.id, 'educake');
+    const modal = buildTimingModal(session);
+    return interaction.showModal(modal);
+  },
+
   async 'edu:timing:submit'(interaction) {
     const min = Number(interaction.fields.getTextInputValue('min'));
     const max = Number(interaction.fields.getTextInputValue('max'));
     if (!validWaits(min, max)) {
-      const embed = new EmbedBuilder().setColor(0xED4245).setDescription('Invalid wait window.');
+      const embed = new EmbedBuilder().setColor(0xED4245).setDescription('Invalid wait window. Min ≥ 1, Max ≤ 200, Min ≤ Max.');
       return interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed] });
     }
     patchPlatform(interaction.user.id, 'educake', { waits: { min: min, max: max } });
@@ -62,13 +117,19 @@ async 'edu:login:submit'(interaction) {
     await interaction.editReply({ embeds: [panel.embed], components: panel.components });
   },
 
+  async 'edu:settings'(interaction) {
+    const session = getPlatform(interaction.user.id, 'educake');
+    const modal = buildEducakeSettingsModal(session);
+    return interaction.showModal(modal);
+  },
+
   async 'edu:settings:submit'(interaction) {
     const min = Number(interaction.fields.getTextInputValue('min'));
     const max = Number(interaction.fields.getTextInputValue('max'));
     const includeImages = (interaction.fields.getTextInputValue('includeImages') || 'yes').toLowerCase() !== 'no';
     const model = interaction.fields.getTextInputValue('model')?.trim() || null;
     if (!validWaits(min, max)) {
-      const embed = new EmbedBuilder().setColor(0xED4245).setDescription('Invalid wait window.');
+      const embed = new EmbedBuilder().setColor(0xED4245).setDescription('Invalid wait window. Min ≥ 1, Max ≤ 200, Min ≤ Max.');
       return interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed] });
     }
     patchPlatform(interaction.user.id, 'educake', { waits: { min: min, max: max }, includeImages: includeImages, model: model });
@@ -84,3 +145,83 @@ async 'edu:login:submit'(interaction) {
     const panel = await buildPanel({ interaction: interaction });
     await interaction.editReply({ embeds: [panel.embed], components: panel.components });
   },
+
+  async 'edu:start'(interaction) {
+    const userId = interaction.user.id;
+    const session = getPlatform(userId, 'educake');
+    const accent = accentFor(userId);
+
+    if (!session?.jwt) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Session expired. Re-login.' });
+    if (!session.selectedAttemptId) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Pick a quiz from the dropdown first.' });
+
+    const eduState = getPlatform(userId, 'educake');
+    const quizRow = (eduState.quizzes || []).find(q => q.attemptId === eduState.selectedAttemptId);
+    if (!quizRow) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Selected quiz not found in session.' });
+
+    const ackEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Educake' }).setDescription('📥 Opening DM. Progress will stream there.');
+    await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [ackEmbed] });
+
+    let progressMsg;
+    try {
+      const dmChannel = await interaction.user.createDM();
+      const dmEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Educake' }).setDescription('⏳ Waiting for queue slot…');
+      progressMsg = await dmChannel.send({ embeds: [dmEmbed] });
+    } catch (err) {
+      return interaction.editReply({ content: 'Could not open DMs. Please check your privacy settings.' });
+    }
+
+    const signal = { cancelled: false };
+    const task = new Task({
+      userId: userId, kind: 'run', timeoutMs: 30 * 60 * 1000,
+      run: async function () {
+        try {
+          const opened = await openAttempt(session, quizRow.attemptId);
+          const runSession = getPlatform(userId, 'educake');
+          runSession.startedAt = Date.now();
+          
+          const summary = await runAttempt({
+            session: runSession, attemptId: opened.attemptId,
+            attempt: { questions: opened.attempt.questions, questionMap: opened.attempt.questionMap, name: opened.attempt.name },
+            interaction: { editReply: (opts) => progressMsg.edit(opts), user: interaction.user },
+            signal: signal, model: eduState.model || undefined,
+            quizTitle: quizRow.title || opened.attempt.name, userId: userId
+          });
+
+          const pdf = await buildSessionPdf(summary);
+          const pct = summary.total > 0 ? Math.round((summary.correct / summary.total) * 100) : 0;
+          
+          const finalEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · session complete' })
+            .addFields(
+              { name: 'Quiz', value: summary.quizTitle },
+              { name: 'Score', value: summary.correct + ' / ' + summary.total + ' · ' + pct + '%' },
+              { name: 'Breakdown', value: '✓ ' + summary.correct + ' ✗ ' + summary.incorrect + ' ⚠ ' + summary.noAnswer }
+            );
+
+          await progressMsg.edit({
+            embeds: [finalEmbed],
+            files: [new AttachmentBuilder(pdf, { name: 'session-summary.pdf' })]
+          });
+        } catch (e) {
+          log('[run] FATAL: ' + e.message);
+          const errEmbed = new EmbedBuilder().setColor(0xED4245).setDescription('Run failed: ' + e.message);
+          await progressMsg.edit({ embeds: [errEmbed] }).catch(() => {});
+        }
+      },
+    });
+
+    const currentState = getPlatform(userId, 'educake');
+    currentState.activeSignal = signal;
+    setPlatform(userId, 'educake', currentState);
+    queue.enqueue(task);
+  },
+
+  async 'edu:cancel'(interaction) {
+    const session = getPlatform(interaction.user.id, 'educake');
+    if (session && session.activeSignal) session.activeSignal.cancelled = true;
+    await interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Cancellation signalled.' });
+  },
+};
+
+queue.on('finish', function (task, err) {
+  log('[queue] finished ' + task.id + ' kind=' + task.kind + ' err=' + (err ? err.message : 'none'));
+});
