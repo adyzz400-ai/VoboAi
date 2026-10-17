@@ -186,35 +186,24 @@ export const eduHandlers = {
     const session = getPlatform(userId, 'educake');
     const accent = accentFor(userId);
 
-    if (!session) {
-      return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Log in first.' });
-    }
-    if (!session.jwt) {
-      return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Session expired — log in again.' });
-    }
-    if (!session.selectedAttemptId) {
-      return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Pick a quiz from the dropdown first.' });
-    }
+    if (!session) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Log in first.' });
+    if (!session.jwt) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Session expired — log in again.' });
+    if (!session.selectedAttemptId) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Pick a quiz from the dropdown first.' });
 
-    await interaction.reply({
-      flags: MessageFlags.Ephemeral,
-      embeds: [new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Educake' })
-        .setDescription('📥 Run queued. Live progress will appear here.')],
-    });
-
-    const signal = { cancelled: false };
     const eduState = getPlatform(userId, 'educake');
     const quizzesList = eduState.quizzes ?? [];
-    const quizRow = quizzesList.find(function (q) { return q.attemptId === eduState.selectedAttemptId; });
+    const quizRow = quizzesList.find(q => q.attemptId === eduState.selectedAttemptId);
 
     if (!quizRow) {
-      return interaction.followUp({ flags: MessageFlags.Ephemeral, content: 'Selected quiz not found in session.' });
+      return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Selected quiz not found in session.' });
     }
 
-    const progressMsg = await interaction.followUp({
+    const signal = { cancelled: false };
+    const progressMsg = await interaction.reply({
       flags: MessageFlags.Ephemeral,
       embeds: [new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Educake' })
-        .setDescription('⏳ Waiting for queue slot…')],
+        .setDescription('📥 Run starting...')],
+      fetchReply: true
     });
 
     const task = new Task({
@@ -222,41 +211,52 @@ export const eduHandlers = {
       kind: 'run',
       timeoutMs: 30 * 60 * 1000,
       run: async function () {
-        const opened = await openAttempt(session, quizRow.attemptId);
-        const attemptId = opened.attemptId;
-        const attempt = opened.attempt;
-
-        const summary = await runAttempt({
-          session: { ...getPlatform(userId, 'educake'), startedAt: Date.now() },
-          attemptId: attemptId,
-          attempt: { questions: attempt.questions, questionMap: attempt.questionMap, name: attempt.name },
-          interaction: { editReply: function (opts) { return progressMsg.edit(opts); }, user: interaction.user },
-          signal: signal,
-          model: eduState.model || undefined,
-          quizTitle: quizRow.title || attempt.name,
-          userId: userId,
-        });
-
-        const pdf = await buildSessionPdf(summary);
         try {
-          const dm = await interaction.user.createDM();
-          const pct = summary.total > 0 ? Math.round((summary.correct / summary.total) * 100) : 0;
-          const breakdown = '✓ ' + summary.correct + ' correct   ✗ ' + summary.incorrect +
-            ' incorrect   ? ' + summary.unmarked + ' unmarked   ⚠ ' + summary.noAnswer + ' no AI answer';
-          await dm.send({
-            embeds: [new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · session complete' })
+          log('[run] Calling openAttempt...');
+          const opened = await openAttempt(session, quizRow.attemptId);
+          log('[run] openAttempt success, starting loop.');
+          
+          const summary = await runAttempt({
+            session: { ...getPlatform(userId, 'educake'), startedAt: Date.now() },
+            attemptId: opened.attemptId,
+            attempt: { questions: opened.attempt.questions, questionMap: opened.attempt.questionMap, name: opened.attempt.name },
+            interaction: { editReply: (opts) => progressMsg.edit(opts), user: interaction.user },
+            signal: signal,
+            model: eduState.model || undefined,
+            quizTitle: quizRow.title || opened.attempt.name,
+            userId: userId,
+          });
+
+          log('[run] Loop done, building PDF...');
+          const pdf = await buildSessionPdf(summary);
+          try {
+            const dm = await interaction.user.createDM();
+            const pct = summary.total > 0 ? Math.round((summary.correct / summary.total) * 100) : 0;
+            const breakdown = '✓ ' + summary.correct + ' correct   ✗ ' + summary.incorrect +
+              ' incorrect   ? ' + summary.unmarked + ' unmarked   ⚠ ' + summary.noAnswer + ' no AI answer';
+            
+            const finalEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · session complete' })
               .addFields(
                 { name: 'Quiz', value: summary.quizTitle },
                 { name: 'Score', value: summary.correct + ' / ' + summary.total + '  ·  ' + pct + '%' },
                 { name: 'Breakdown', value: breakdown },
-              )],
-            files: [
-              new AttachmentBuilder(await renderScoreBar(summary.correct, summary.total), { name: 'score.png' }),
-              new AttachmentBuilder(pdf, { name: 'session-summary.pdf' }),
-            ],
-          });
-        } catch (err) {
-          warn('[run] DM failed: ' + err.message);
+              );
+
+            const scoreBuf = await renderScoreBar(summary.correct, summary.total);
+            await dm.send({
+              embeds: [finalEmbed],
+              files: [
+                new AttachmentBuilder(scoreBuf, { name: 'score.png' }),
+                new AttachmentBuilder(pdf, { name: 'session-summary.pdf' }),
+              ],
+            });
+            log('[run] DM sent.');
+          } catch (err) {
+            warn('[run] DM failed: ' + err.message);
+          }
+        } catch (e) {
+          log('[run] FATAL: ' + e.message);
+          await progressMsg.edit({ embeds: [new EmbedBuilder().setColor(0xED4245).setAuthor({ name: 'Vobo AI · Educake' }).setDescription('Run failed: ' + e.message)] }).catch(()=>{});
         }
       },
     });
