@@ -12,10 +12,11 @@ function client() {
   return genAI;
 }
 
+// Updated chain to models that actually exist on current API keys
 const MODEL_CHAIN = [
   'gemini-3.8-flash',
-  'gemini-1.5-flash',
-  'gemini-1.5-pro'
+  'gemini-2.0-flash',
+  'gemini-1.5-flash-latest'
 ];
 
 const SYSTEM_RULE = (q) => {
@@ -36,13 +37,8 @@ const SYSTEM_RULE = (q) => {
 
 async function fetchImageAsInline(url, session) {
   try {
-    log(`[gemini] Fetching image: ${url}`);
-    
-    // Convert relative URL to absolute if needed
     let absoluteUrl = url;
-    if (url.startsWith('/')) {
-      absoluteUrl = 'https://my.educake.co.uk' + url;
-    }
+    if (url.startsWith('/')) absoluteUrl = 'https://my.educake.co.uk' + url;
 
     const b64 = await session.page.evaluate(async (u) => {
       const res = await fetch(u, { credentials: 'include' });
@@ -54,26 +50,13 @@ async function fetchImageAsInline(url, session) {
       return btoa(bin);
     }, absoluteUrl);
 
-    if (!b64) {
-      warn(`[gemini] Failed to fetch image data: ${absoluteUrl}`);
-      return null;
-    }
+    if (!b64) return null;
     
     let mime = 'image/jpeg';
     if (absoluteUrl.toLowerCase().endsWith('.png')) mime = 'image/png';
     
-    // If it's an SVG, we can't send it as inline image data directly to Gemini.
-    // We'll convert it to a data URI string and pass it as text if needed, 
-    // but for now, we'll label it as png if we have to, though it might fail.
-    if (absoluteUrl.toLowerCase().endsWith('.svg')) {
-        log(`[gemini] SVG detected. Gemini inlineData doesn't support SVG well.`);
-        // Note: Ideally we would use a canvas library to convert SVG to PNG here.
-    }
-
-    log(`[gemini] Image successfully fetched and attached (${mime}).`);
     return { inlineData: { data: b64, mimeType: mime } };
   } catch (err) {
-    warn(`[gemini] image fetch failed for ${url}: ${err.message}`);
     return null;
   }
 }
@@ -88,34 +71,32 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 export async function getAIanswer(q, session, { model = config.geminiDefault } = {}) {
   const chain = [model, ...MODEL_CHAIN.filter(m => m !== model)];
-  
   const parts = [{ text: `${SYSTEM_RULE(q)}\n\nQuestion:\n${q.prompt}` }];
 
   if (q.image) {
     const inline = await fetchImageAsInline(q.image, session);
-    if (inline) {
-      parts.push(inline);
-    } else {
-      warn('[gemini] Proceeding without image because fetch failed.');
-    }
+    if (inline) parts.push(inline);
   }
 
   for (let i = 0; i < chain.length; i++) {
     const m = chain[i];
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) { // Increased retries to 3
       try {
         const raw = await callOnce(m, parts);
-        const text = raw.replace(/^["'`]+|["'`]+$/g, '').trim();
+        const text = raw.replace(/^["'`]+|["text'`]+$/g, '').trim();
         if (text) {
-          log(`[gemini] Success with model: ${m} -> "${text}"`);
+          log(`[gemini] Success with ${m} -> "${}"`);
           return { answer: text, model: m };
         }
       } catch (err) {
         const status = err?.status ?? err?.response?.status;
-        warn(`[gemini] ${m} attempt ${attempt + 1} failed (${status ?? '?'}): ${err.message.slice(0, 120)}`);
+        warn(`[gemini] ${m} failed (${status ?? '?'})`);
+        
         if (status === 404) break; 
+        
+        // If rate limited (429), wait longer before retrying
         if (status === 503 || status === 429) { 
-          await sleep(1000 * (attempt + 1)); 
+          await sleep(5000 * (attempt + 1)); 
           continue; 
         }
         break; 
@@ -123,6 +104,6 @@ export async function getAIanswer(q, session, { model = config.geminiDefault } =
     }
   }
 
-  warn('[gemini] all models failed — returning null answer');
+  warn('[gemini] ALL models failed (rate limited or missing).');
   return { answer: null, model: null };
 }
