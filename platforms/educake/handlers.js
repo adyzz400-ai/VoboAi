@@ -1,5 +1,5 @@
 // language: JavaScript (ESM), file: platforms/educake/handlers.js
-import { EmbedBuilder, MessageFlags } from 'discord.js';
+import { EmbedBuilder, MessageFlags, AttachmentBuilder } from 'discord.js';
 import { log, warn } from '../../utils/logger.js';
 import { getPlatform, setPlatform, patchPlatform, getTheme } from '../../hub/sessionStore.js';
 import { buildPanel } from './panel.js';
@@ -17,33 +17,28 @@ import { config } from '../../utils/config.js';
 import { jwtExpiryMs } from './auth.js';
 
 function accentFor(userId) {
-  const hex = getTheme(userId);
-  return parseInt(hex.replace('#', ''), 16);
+  return parseInt(getTheme(userId).replace('#', ''), 16);
 }
 
 function validWaits(min, max) {
-  if (!Number.isFinite(min)) return false;
-  if (!Number.isFinite(max)) return false;
-  if (min < 1) return false;
-  if (max < 1) return false;
-  if (max > 200) return false;
-  if (min > max) return false;
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min < 1 || max < 1 || max > 200 || min > max) return false;
   return true;
 }
 
 export const eduHandlers = {
   async 'edu:login'(interaction) {
     const accent = accentFor(interaction.user.id);
-    const embed = buildVariantEmbed(accent);
-    const select = buildVariantSelect();
-    return interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed], components: [select] });
+    return interaction.reply({ 
+      flags: MessageFlags.Ephemeral, 
+      embeds: [buildVariantEmbed(accent)], 
+      components: [buildVariantSelect()] 
+    });
   },
 
   async 'edu:login:variant'(interaction) {
     const choice = interaction.values[0];
     if (choice !== 'educake') {
-      let label = 'Google';
-      if (choice === 'educake-ms') label = 'Microsoft';
+      let label = choice === 'educake-ms' ? 'Microsoft' : 'Google';
       const embed = new EmbedBuilder().setColor(0xEAB308).setAuthor({ name: 'Vobo AI · Educake' }).setDescription('**' + label + ' login** is coming soon.');
       return interaction.update({ embeds: [embed], components: [] });
     }
@@ -71,13 +66,12 @@ export const eduHandlers = {
       run: async function () {
         try {
           const session = await educakeLogin({ username: username, password: password, onStatus: status });
-          const newSession = {
+          setPlatform(interaction.user.id, 'educake', {
             username: username, password: password, browser: session.browser, page: session.page,
             jwt: session.jwt, xsrf: session.xsrf, jwtExpUnix: Math.floor((jwtExpiryMs(session.jwt) ?? Date.now()) / 1000),
             baseUrl: session.baseUrl, waits: { min: config.waits.min, max: config.waits.max },
             includeImages: true, model: null, selectedAttemptId: null, quizzes: null, startedAt: Date.now()
-          };
-          setPlatform(interaction.user.id, 'educake', newSession);
+          });
 
           await status('fetching quiz list');
           try {
@@ -86,7 +80,8 @@ export const eduHandlers = {
           } catch (err) { warn('[educake] quiz list failed: ' + err.message); }
 
           const panel = await buildPanel({ interaction: interaction });
-          await interaction.editReply({ embeds: [panel.embed], components: panel.components });
+          // The panel now returns `components` array containing the Container
+          await interaction.editReply({ components: panel.components, flags: MessageFlags.Ephemeral });
         } catch (err) {
           log('[educake] login error: ' + err.message);
           const embed = new EmbedBuilder().setColor(0xED4245).setAuthor({ name: 'Vobo AI · Educake' }).setDescription('❌ Login failed: ' + err.message);
@@ -111,7 +106,7 @@ export const eduHandlers = {
     patchPlatform(interaction.user.id, 'educake', { waits: { min: min, max: max } });
     await interaction.deferUpdate();
     const panel = await buildPanel({ interaction: interaction });
-    await interaction.editReply({ embeds: [panel.embed], components: panel.components });
+    await interaction.editReply({ components: panel.components });
   },
 
   async 'edu:settings'(interaction) {
@@ -130,7 +125,7 @@ export const eduHandlers = {
     patchPlatform(interaction.user.id, 'educake', { waits: { min: min, max: max }, includeImages: includeImages, model: model });
     await interaction.deferUpdate();
     const panel = await buildPanel({ interaction: interaction });
-    await interaction.editReply({ embeds: [panel.embed], components: panel.components });
+    await interaction.editReply({ components: panel.components });
   },
 
   async 'edu:quiz'(interaction) {
@@ -138,7 +133,7 @@ export const eduHandlers = {
     patchPlatform(interaction.user.id, 'educake', { selectedAttemptId: attemptId });
     await interaction.deferUpdate();
     const panel = await buildPanel({ interaction: interaction });
-    await interaction.editReply({ embeds: [panel.embed], components: panel.components });
+    await interaction.editReply({ components: panel.components });
   },
 
   async 'edu:start'(interaction) {
@@ -146,8 +141,7 @@ export const eduHandlers = {
     const session = getPlatform(userId, 'educake');
     const accent = accentFor(userId);
 
-    if (!session) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Log in first.' });
-    if (!session.jwt) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Session expired — log in again.' });
+    if (!session?.jwt) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Session expired. Re-login.' });
     if (!session.selectedAttemptId) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Pick a quiz from the dropdown first.' });
 
     const eduState = getPlatform(userId, 'educake');
@@ -195,7 +189,7 @@ export const eduHandlers = {
 
           await progressMsg.edit({
             embeds: [finalEmbed],
-            files: [new (await import('discord.js')).AttachmentBuilder(pdf, { name: 'session-summary.pdf' })]
+            files: [new AttachmentBuilder(pdf, { name: 'session-summary.pdf' })]
           });
         } catch (e) {
           log('[run] FATAL: ' + e.message);
@@ -217,3 +211,7 @@ export const eduHandlers = {
     await interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Cancellation signalled.' });
   },
 };
+
+queue.on('finish', function (task, err) {
+  log(`[queue] finished ${task.id} kind=${task.kind} err=${err ? err.message : 'none'}`);
+});
