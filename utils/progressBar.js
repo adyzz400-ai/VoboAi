@@ -23,9 +23,7 @@ export function renderProgressBar(opts) {
     const bg = opts.bg || 'transparent';
     const label = opts.label || null;
     
-    // Increased label padding to fit the score text
-    const labelPad = label ? 130 : 0;
-    const canvas = createCanvas(width + labelPad, height);
+    const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
 
     if (bg !== 'transparent') { 
@@ -33,7 +31,7 @@ export function renderProgressBar(opts) {
       ctx.fillRect(0, 0, canvas.width, canvas.height); 
     }
 
-    // Draw track
+    // Draw full track
     ctx.fillStyle = track;
     roundRect(ctx, 0, 0, width, height, radius);
     ctx.fill();
@@ -53,20 +51,19 @@ export function renderProgressBar(opts) {
       ctx.restore();
     }
 
-    // Draw inner border
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    // Draw bright inner border
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
     ctx.lineWidth = 2;
     roundRect(ctx, 1, 1, width - 2, height - 2, radius - 1);
     ctx.stroke();
 
-    // Draw label
+    // Draw label inside the bar, right-aligned
     if (label) {
       ctx.fillStyle = '#FFFFFF';
-      // Slightly smaller font so it fits in the padding
       ctx.font = 'bold 14px sans-serif';
-      ctx.textAlign = 'left';
+      ctx.textAlign = 'right';
       ctx.textBaseline = 'middle';
-      ctx.fillText(label, width + 12, height / 2);
+      ctx.fillText(label, width - 12, height / 2 + 1);
     }
 
     return canvas.toBuffer('image/png');
