@@ -3,7 +3,7 @@ import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentB
 import { config } from '../../utils/config.js';
 import { log, warn } from '../../utils/logger.js';
 import { sleep } from '../../utils/formatTime.js';
-import { submitAnswer } from './quizzes.js';
+import { submitAnswer, finishQuiz } from './quizzes.js';
 import { coerceGivenAnswer } from './parser.js';
 import { getAIanswer } from './getAIanswer.js';
 import { getTheme } from '../../hub/sessionStore.js';
@@ -71,10 +71,20 @@ async function _run(args) {
   const hex = getTheme(userId);
   const accent = parseInt(hex.replace('#', ''), 16);
 
-  const order = attempt.questions.map(String);
   const map = attempt.questionMap ?? {};
+  
+  // ONLY process questions that haven't been answered yet
+  const order = attempt.questions
+    .map(String)
+    .filter(id => map[id] && !map[id].answer);
+
   const total = order.length;
   
+  if (total === 0) {
+    log('[run] No unanswered questions found.');
+    return { quizTitle, total: 0, correct: 0, incorrect: 0, unmarked: 0, noAnswer: 0, cancelled: false, durationSeconds: 0, results: [] };
+  }
+
   let correct = 0;
   let incorrect = 0;
   let unmarked = 0;
@@ -86,7 +96,6 @@ async function _run(args) {
 
     const vid = order[i];
     const q = map[vid];
-    if (!q) continue;
 
     const normQ = {
       variantId: q.id,
@@ -98,12 +107,11 @@ async function _run(args) {
       image: q.image || null,
     };
 
-    log('[run] Q' + (i+1) + ' asking Gemini...');
+    log('[run] Q' + (i+1) + '/' + total + ' asking Gemini...');
     const embed = buildProgressEmbed(accent, { 
       quizTitle, index: i, total, q: normQ, correct, incorrect, status: 'asking AI…' 
     });
     
-    // Generate the PNG
     const barBuf = await renderEducakeProgress(i, total);
     const progressFile = new AttachmentBuilder(barBuf, { name: 'progress.png' });
 
@@ -157,7 +165,7 @@ async function _run(args) {
 
     await interaction.editReply({
       embeds: [waitEmbed],
-      files: [progressFile], // Re-use the same buffer so Discord doesn't re-upload it
+      files: [progressFile],
       components: [runningButtons()],
     }).catch(function() {});
 
@@ -197,7 +205,18 @@ async function _run(args) {
     });
   }
 
-  log('[run] finished all questions.');
+  log('[run] finished all questions, marking quiz complete...');
+  
+  // Mark the quiz as complete in Educake
+  if (!signal.cancelled) {
+    try {
+      await finishQuiz(session, attemptId);
+      log('[run] Quiz marked as finished.');
+    } catch (e) {
+      warn('[run] Failed to finish quiz: ' + e.message);
+    }
+  }
+
   return {
     quizTitle: quizTitle || attempt.name || 'Educake quiz',
     total, correct, incorrect, unmarked, noAnswer,
