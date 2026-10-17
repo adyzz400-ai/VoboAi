@@ -12,7 +12,12 @@ function client() {
   return genAI;
 }
 
-const MODEL_CHAIN = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.5-pro'];
+// Fallback chain: try the best model first, then drop to older stable ones.
+const MODEL_CHAIN = [
+  'gemini-3.8-flash',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro'
+];
 
 const SYSTEM_RULE = (q) => {
   if (q.kind === 'multiple_choice') {
@@ -37,14 +42,9 @@ async function fetchImageAsInline(url, session) {
     }, url);
     if (!b64) return null;
     
-    // Handle SVG which Gemini doesn't natively support as inlineData
     let mime = 'image/jpeg';
     if (url.toLowerCase().endsWith('.png')) mime = 'image/png';
-    if (url.toLowerCase().endsWith('.svg')) {
-        // For SVGs, we just send them as text if we can't convert, or skip.
-        // But Educake mostly uses PNG/JPEG.
-        mime = 'image/svg+xml'; 
-    }
+    
     return { inlineData: { data: b64, mimeType: mime } };
   } catch (err) {
     log(`[gemini] image fetch failed for ${url}: ${err.message}`);
@@ -62,6 +62,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 export async function getAIanswer(q, session, { model = config.geminiDefault } = {}) {
   const chain = [model, ...MODEL_CHAIN.filter(m => m !== model)];
+  
   const parts = [{ text: `${SYSTEM_RULE(q)}\n\nQuestion:\n${q.prompt}` }];
 
   if (q.image) {
@@ -75,12 +76,21 @@ export async function getAIanswer(q, session, { model = config.geminiDefault } =
       try {
         const raw = await callOnce(m, parts);
         const text = raw.replace(/^["'`]+|["'`]+$/g, '').trim();
-        if (text) return { answer: text, model: m };
+        if (text) {
+          log(`[gemini] Success with model: ${m}`);
+          return { answer: text, model: m };
+        }
       } catch (err) {
         const status = err?.status ?? err?.response?.status;
         const is503 = /503|overload|high demand/i.test(err.message || '');
         warn(`[gemini] ${m} attempt ${attempt + 1} failed (${status ?? '?'}): ${err.message.slice(0, 120)}`);
-        if (is503 || status === 429) { await sleep(1000 * (attempt + 1)); continue; }
+        
+        if (status === 404) break; 
+        
+        if (is503 || status === 429) { 
+          await sleep(1000 * (attempt + 1)); 
+          continue; 
+        }
         break; 
       }
     }
