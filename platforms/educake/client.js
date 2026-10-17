@@ -16,50 +16,48 @@ export class EducakeClient {
     const retryOn401 = opts.retryOn401 !== false;
     const url = path.startsWith('http') ? path : config.educakeBaseUrl + path;
 
+    // No Authorization header. No X-XSRF-TOKEN. The browser session carries
+    // cf_clearance + PHPSESSID + XSRF-TOKEN and fetch(credentials:'include')
+    // sends them automatically — same as the real Educake SPA.
     const headers = {
-      'authorization': 'Bearer ' + this.session.jwt,
-      'x-xsrf-token': this.session.xsrf,
-      'x-correlation-id': crypto.randomUUID(),
       'accept': 'application/json;version=2',
+      'x-correlation-id': crypto.randomUUID(),
     };
 
-    log('[client] ' + method + ' ' + path + ' — evaluating in page');
+    log('[client] ' + method + ' ' + path + ' — in-page fetch');
 
     let result;
     try {
-      result = await this.page.evaluate(fetchArgs => {
+      result = await this.page.evaluate(async (args) => {
         const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 20000);
-        return (async () => {
-          try {
-            const init = {
-              method: fetchArgs.method,
-              credentials: 'include',
-              mode: 'cors',
-              signal: ctrl.signal,
-              headers: {
-                'accept': 'application/json, text/plain, */*',
-                'accept-language': 'en-GB,en;q=0.9',
-                'origin': 'https://my.educake.co.uk',
-                'referer': 'https://my.educake.co.uk' + location.pathname,
-                ...fetchArgs.headers,
-              },
-            };
-            if (fetchArgs.body !== undefined && fetchArgs.body !== null) {
-              init.body = JSON.stringify(fetchArgs.body);
-              init.headers['content-type'] = 'application/json';
-            }
-            const res = await fetch(fetchArgs.url, init);
-            const text = await res.text();
-            let json = null;
-            try { json = text ? JSON.parse(text) : null; } catch (e) { /* not json */ }
-            return { status: res.status, ok: res.ok, text: text, json: json };
-          } catch (err) {
-            return { status: 0, ok: false, text: 'evaluate-error: ' + err.message, json: null };
-          } finally {
-            clearTimeout(timer);
+        const timer = setTimeout(() => ctrl.abort(), 30000);
+        try {
+          const init = {
+            method: args.method,
+            credentials: 'include',
+            mode: 'cors',
+            signal: ctrl.signal,
+            headers: Object.assign({
+              'accept': 'application/json, text/plain, */*',
+              'accept-language': 'en-GB,en;q=0.9',
+              'origin': 'https://my.educake.co.uk',
+              'referer': 'https://my.educake.co.uk' + location.pathname,
+            }, args.headers),
+          };
+          if (args.body !== undefined && args.body !== null) {
+            init.body = JSON.stringify(args.body);
+            init.headers['content-type'] = 'application/json';
           }
-        })();
+          const res = await fetch(args.url, init);
+          const text = await res.text();
+          let json = null;
+          try { json = text ? JSON.parse(text) : null; } catch (e) { /* not json */ }
+          return { status: res.status, ok: res.ok, text: text, json: json };
+        } catch (err) {
+          return { status: 0, ok: false, text: 'evaluate-error: ' + err.message, json: null };
+        } finally {
+          clearTimeout(timer);
+        }
       }, { url, method, body, headers });
     } catch (err) {
       warn('[client] page.evaluate threw: ' + err.message);
@@ -68,11 +66,11 @@ export class EducakeClient {
       throw e;
     }
 
-    log('[client] ' + method + ' ' + path + ' — response ' + result.status);
+    log('[client] ' + method + ' ' + path + ' — ' + result.status);
 
     if (!result.ok) {
       if (result.status === 401 && retryOn401 && typeof this.session.onAuthFail === 'function') {
-        warn('[client] 401 — attempting re-auth');
+        warn('[client] 401 — re-auth');
         await this.session.onAuthFail();
         opts.retryOn401 = false;
         return this.call(path, opts);
