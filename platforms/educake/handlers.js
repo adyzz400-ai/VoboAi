@@ -1,5 +1,5 @@
 // language: JavaScript (ESM), file: platforms/educake/handlers.js
-import { EmbedBuilder, MessageFlags, AttachmentBuilder } from 'discord.js';
+import { EmbedBuilder, MessageFlags } from 'discord.js';
 import { log, warn } from '../../utils/logger.js';
 import { getPlatform, setPlatform, patchPlatform, getTheme } from '../../hub/sessionStore.js';
 import { buildPanel } from './panel.js';
@@ -11,7 +11,6 @@ import { educakeLogin } from './login.js';
 import { listQuizzes, openAttempt } from './quizzes.js';
 import { runAttempt } from './autocompleter.js';
 import { buildSessionPdf } from './pdf.js';
-import { renderScoreBar } from './progress.js';
 import { queue } from '../../queue/index.js';
 import { Task } from '../../queue/task.js';
 import { config } from '../../utils/config.js';
@@ -56,7 +55,6 @@ export const eduHandlers = {
     const password = interaction.fields.getTextInputValue('password');
     const accent = accentFor(interaction.user.id);
 
-    // Defer ephemerally to create a new, dismissible message
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const status = async function (line) {
@@ -87,7 +85,6 @@ export const eduHandlers = {
             patchPlatform(interaction.user.id, 'educake', { quizzes: result.quizzes });
           } catch (err) { warn('[educake] quiz list failed: ' + err.message); }
 
-          // Edit the ephemeral reply. This KEEPS the "Dismiss message" footer!
           const panel = await buildPanel({ interaction: interaction });
           await interaction.editReply({ embeds: [panel.embed], components: panel.components });
         } catch (err) {
@@ -196,10 +193,9 @@ export const eduHandlers = {
               { name: 'Breakdown', value: `✓ ${summary.correct} ✗ ${summary.incorrect} ⚠ ${summary.noAnswer}` }
             );
 
-          const scoreBuf = await renderScoreBar(summary.correct, summary.total);
           await progressMsg.edit({
             embeds: [finalEmbed],
-            files: [new AttachmentBuilder(scoreBuf, { name: 'score.png' }), new AttachmentBuilder(pdf, { name: 'session-summary.pdf' })]
+            files: [new (await import('discord.js')).AttachmentBuilder(pdf, { name: 'session-summary.pdf' })]
           });
         } catch (e) {
           log('[run] FATAL: ' + e.message);
