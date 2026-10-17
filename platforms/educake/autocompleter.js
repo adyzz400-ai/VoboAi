@@ -7,17 +7,20 @@ import { submitAnswer, finishQuiz } from './quizzes.js';
 import { coerceGivenAnswer } from './parser.js';
 import { getAIanswer } from './getAIanswer.js';
 import { getTheme } from '../../hub/sessionStore.js';
-import { renderSenAIProgressBar } from '../../utils/senaiLayout.js';
+import { renderProgressBar } from '../../utils/progressBar.js';
 
 function buildProgressEmbed(accent, opts) {
   const e = new EmbedBuilder();
   e.setColor(accent);
   e.setAuthor({ name: 'Vobo AI · running' });
   
-  // This puts the image INSIDE the embed
-  e.setImage('attachment://progress.png');
+  const pct = Math.round(((opts.correct + opts.incorrect) / opts.total) * 100) || 0;
+  
+  // Format exactly like the reference: "1. Task 1 `100%`"
+  const progressText = '**' + (opts.index + 1) + '. Question ' + (opts.index + 1) + '** `' + pct + '%`\n\n';
   
   e.addFields(
+    { name: 'Progress', value: progressText },
     { name: 'Current', value: (opts.q?.prompt || '—').slice(0, 280) || '—' }
   );
   
@@ -27,6 +30,9 @@ function buildProgressEmbed(accent, opts) {
   
   const scoreVal = '✓ ' + opts.correct + ' correct   ✗ ' + opts.incorrect + ' incorrect';
   e.addFields({ name: 'Score so far', value: scoreVal });
+  
+  // Put the image in the embed
+  e.setImage('attachment://progress.png');
   
   if (opts.status) {
     e.setFooter({ text: opts.status });
@@ -102,8 +108,8 @@ async function _run(args) {
 
     log('[run] Q' + (i+1) + '/' + total + ' asking Gemini...');
     
-    // Render the SenAI layout as an image
-    const barBuf = await renderSenAIProgressBar(i + 1, total, correct);
+    // Render the clean, square bar
+    const barBuf = renderProgressBar(i, total);
     const progressFile = new AttachmentBuilder(barBuf, { name: 'progress.png' });
 
     const embed = buildProgressEmbed(accent, { 
