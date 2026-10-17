@@ -4,7 +4,6 @@ import { config } from '../utils/config.js';
 import { resolvePlatformFromLoginValue, VALID_LOGIN_VALUES } from '../platforms/index.js';
 
 export async function handleStartModal(interaction) {
-  // 1. ACKNOWLEDGE IMMEDIATELY to avoid "Unknown interaction" (10062) timeout
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const value = interaction.fields.getTextInputValue('platform').trim().toLowerCase();
@@ -19,7 +18,12 @@ export async function handleStartModal(interaction) {
   
   try {
     const panel = await platform.panel({ interaction, loginVariant: value });
-    await interaction.editReply({ components: panel.components });
+    // Send the Component V2 panel with the required flag
+    await interaction.editReply({ 
+      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+      embeds: [],
+      components: panel.components
+    });
   } catch (err) {
     const embed = new EmbedBuilder().setColor(0xED4245).setAuthor({ name: 'Vobo AI' })
       .setDescription('Failed to build the panel: ' + err.message);
