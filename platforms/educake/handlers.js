@@ -28,10 +28,12 @@ function validWaits(min, max) {
 export const eduHandlers = {
   async 'edu:login'(interaction) {
     const accent = accentFor(interaction.user.id);
+    const embed = buildVariantEmbed(accent);
+    const select = buildVariantSelect();
     return interaction.reply({ 
       flags: MessageFlags.Ephemeral, 
-      embeds: [buildVariantEmbed(accent)], 
-      components: [buildVariantSelect()] 
+      embeds: [embed], 
+      components: [select] 
     });
   },
 
@@ -42,7 +44,8 @@ export const eduHandlers = {
       const embed = new EmbedBuilder().setColor(0xEAB308).setAuthor({ name: 'Vobo AI · Educake' }).setDescription('**' + label + ' login** is coming soon.');
       return interaction.update({ embeds: [embed], components: [] });
     }
-    return interaction.showModal(buildEducakeLoginModal());
+    const modal = buildEducakeLoginModal();
+    return interaction.showModal(modal);
   },
 
   async 'edu:login:submit'(interaction) {
@@ -81,7 +84,6 @@ export const eduHandlers = {
 
           const panel = await buildPanel({ interaction: interaction });
           
-          // Component V2 requires IsComponentsV2 flag and NO embeds.
           await interaction.editReply({ 
             flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
             embeds: [],
@@ -98,7 +100,9 @@ export const eduHandlers = {
   },
 
   async 'edu:timing'(interaction) {
-    return interaction.showModal(buildTimingModal(getPlatform(interaction.user.id, 'educake')));
+    const session = getPlatform(interaction.user.id, 'educake');
+    const modal = buildTimingModal(session);
+    return interaction.showModal(modal);
   },
 
   async 'edu:timing:submit'(interaction) {
@@ -115,8 +119,9 @@ export const eduHandlers = {
   },
 
   async 'edu:settings'(interaction) {
-    return interaction.showModal(buildEducakeSettingsModal(getPlatform(interaction.user.id, 'educ);
-ake')));
+    const session = getPlatform(interaction.user.id, 'educake');
+    const modal = buildEducakeSettingsModal(session);
+    return interaction.showModal(modal);
   },
 
   async 'edu:settings:submit'(interaction) {
@@ -152,7 +157,7 @@ ake')));
 
     const eduState = getPlatform(userId, 'educake');
     const quizRow = (eduState.quizzes || []).find(q => q.attemptId === eduState.selectedAttemptId);
-    if (!quizRow) return interaction.reply({ flags: MessageFlags.Ephe         meral, content: 'Selected quiz await not found in session.' });
+    if (!quizRow) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Selected quiz not found in session.' });
 
     const ackEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Educake' }).setDescription('📥 Opening DM. Progress will stream there.');
     await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [ackEmbed] });
@@ -177,7 +182,7 @@ ake')));
           
           const summary = await runAttempt({
             session: runSession, attemptId: opened.attemptId,
-            attempt: { progressMsg questions: opened.attempt.questions, questionMap: opened.attempt.questionMap, name: opened.attempt.name },
+            attempt: { questions: opened.attempt.questions, questionMap: opened.attempt.questionMap, name: opened.attempt.name },
             interaction: { editReply: (opts) => progressMsg.edit(opts), user: interaction.user },
             signal: signal, model: eduState.model || undefined,
             quizTitle: quizRow.title || opened.attempt.name, userId: userId
@@ -199,7 +204,8 @@ ake')));
           });
         } catch (e) {
           log('[run] FATAL: ' + e.message);
-          const errEmbed = new EmbedBuilder().setColor(0xED4245).setDescription('Run failed: ' + e.message.edit({ embeds: [errEmbed] }).catch(() => {});
+          const errEmbed = new EmbedBuilder().setColor(0xED4245).setDescription('Run failed: ' + e.message);
+          await progressMsg.edit({ embeds: [errEmbed] }).catch(() => {});
         }
       },
     });
