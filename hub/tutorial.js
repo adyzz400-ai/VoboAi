@@ -13,10 +13,10 @@ export function buildTutorialEmbed() {
       '• Press **Start** on the hub.\n' +
       '• Pick your platform in the popup.\n\n' +
       '**2 · Log in**\n' +
-      '• A modal appears. Type your username/email and password.\n' +
+      '• A modal appears. Type your credentials.\n' +
       '• They go straight into a headless browser — never into chat.\n\n' +
-      '**3 · Pick a quiz**\n' +
-      '• Once connected, the panel lists every outstanding quiz with its due date and question count.\n' +
+      '**3 · Pick a task**\n' +
+      '• Once connected, the panel lists your outstanding work with due dates.\n' +
       '• Choose one from the dropdown.\n\n' +
       '**4 · Run**\n' +
       '• Press **Start** again.\n' +
