@@ -1,9 +1,9 @@
 // language: JavaScript (ESM), file: hub/panel.js
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { config } from '../utils/config.js';
-import { PLATFORMS } from '../platforms/index.js';
+import { PLATFORMS } from '../platformsHex = (/index.js';
 
-const parseHex = (hex) => parseInt(hex.replace('#', ''), 16);
+consthex) => parseInt(hex.replace('#', ''), 16);
 
 function hubDescription() {
   return [
@@ -42,14 +42,6 @@ export function buildHubButtons() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('hub:start').setLabel('Start').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('hub:tutorial').setLabel('Tutorial').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('hub:theme').setLabel('Theme').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('hub:settings').setLabel('Settings').setStyle(ButtonStyle.Secondary),
   );
-}
-
-export function buildHubThemeRow(currentHex) {
-  const current = (currentHex || config.accent).replace('#', '').toUpperCase();
-  const row = new ActionRowBuilder();
-  // Simplified to just add the select menu directly without V2
-  return row;
 }
