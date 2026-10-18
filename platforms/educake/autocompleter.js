@@ -1,5 +1,9 @@
 // language: JavaScript (ESM), file: platforms/educake/autocompleter.js
-import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } from 'discord.js';
+import { 
+  ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, 
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, 
+  AttachmentBuilder, MessageFlags 
+} from 'discord.js';
 import { config } from '../../utils/config.js';
 import { log, warn } from '../../utils/logger.js';
 import { sleep } from '../../utils/formatTime.js';
@@ -9,51 +13,44 @@ import { getAIanswer } from './getAIanswer.js';
 import { getTheme } from '../../hub/sessionStore.js';
 import { renderSenAIProgressBar } from '../../utils/senaiLayout.js';
 
-function buildProgressEmbed(accent, opts) {
-  const e = new EmbedBuilder();
-  e.setColor(accent);
-  e.setAuthor({ name: 'Vobo AI · running' });
-  
-  // FIXED: opts.index is now the remaining index (0 to remainingTotal)
+function buildProgressContainer(accent, opts) {
+  const container = new ContainerBuilder();
+  container.setAccentColor(accent);
+
   const currentNum = opts.index + 1;
   const remainingTotal = opts.total;
 
   const pct = Math.round((opts.correct / (opts.correct + opts.incorrect + (remainingTotal - currentNum))) * 100) || 0;
   
-  const progressText = '**' + currentNum + '. Question ' + currentNum + '** `' + pct + '%`';
-  
-  e.addFields(
-    { name: 'Progress', value: progressText + ' (of ' + remainingTotal + ' remaining)' },
-    { name: 'Current', value: (opts.q?.prompt || '—').slice(0, 280) || '—' }
-  );
-  
-  if (opts.waitUntilUnix) {
-    e.addFields({ name: 'Timing', value: 'Next answer: <t:' + Math.floor(opts.waitUntilUnix) + ':R>' });
-  }
-  
-  const scoreVal = '✓ ' + opts.correct + ' correct   ✗ ' + opts.incorrect + ' incorrect';
-  e.addFields({ name: 'Score so far', value: scoreVal });
-  
-  e.setImage('attachment://progress.png');
-  if (opts.status) e.setFooter({ text: opts.status });
-  
-  return e;
-}
+  const titleText = '### Vobo AI · running';
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(titleText));
+  container.addSeparatorComponents(new SeparatorBuilder());
 
-function runningButtons() {
-  const btn = new ButtonBuilder().setCustomId('edu:cancel').setLabel('Cancel').setEmoji('⛔').setStyle(ButtonStyle.Danger);
-  const row = new ActionRowBuilder();
-  row.addComponents(btn);
-  return row;
+  const progressText = '**Progress**\n' + 
+    '**' + currentNum + '. Question ' + currentNum + '** `' + pct + '%` (of ' + remainingTotal + ' remaining)\n\n' +
+    '**Current**\n' + ((opts.q?.prompt || '—').slice(0, 280) || '—') + '\n\n' +
+    (opts.waitUntilUnix ? '**Timing**\nNext answer: <t:' + Math.floor(opts.waitUntilUnix) + ':R>\n\n' : '') +
+    '**Score so far**\n✓ ' + opts.correct + ' correct   ✗ ' + opts.incorrect + ' incorrect';
+
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(progressText));
+  
+  const media = new TextDisplayBuilder().setContent('attachment://progress.png');
+  container.addTextDisplayComponents(media);
+
+  const cancelBtn = new ButtonBuilder()
+    .setCustomId('edu:cancel')
+    .setLabel('Cancel')
+    .setEmoji('⛔')
+    .setStyle(ButtonStyle.Secondary); // Outlined look
+
+  container.addActionRowComponents(new ActionRowBuilder().addComponents(cancelBtn));
+
+  return { components: [container] };
 }
 
 export async function runAttempt(args) {
-  try {
-    return await _run(args);
-  } catch (err) {
-    log('[run] CRASHED: ' + err.message);
-    throw err;
-  }
+  try { return await _run(args); } 
+  catch (err) { log('[run] CRASHED: ' + err.message); throw err; }
 }
 
 async function _run(args) {
@@ -70,8 +67,6 @@ async function _run(args) {
   const accent = parseInt(hex.replace('#', ''), 16);
 
   const map = attempt.questionMap || {};
-  
-  // Filter ONLY unanswered questions
   const order = attempt.questions.map(String).filter(id => map[id] && !map[id].answer);
   const total = order.length;
   
@@ -79,10 +74,7 @@ async function _run(args) {
     return { quizTitle, total: 0, correct: 0, incorrect: 0, unmarked: 0, noAnswer: 0, cancelled: false, durationSeconds: 0, results: [] };
   }
 
-  let correct = 0;
-  let incorrect = 0;
-  let unmarked = 0;
-  let noAnswer = 0;
+  let correct = 0, incorrect = 0, unmarked = 0, noAnswer = 0;
   const results = [];
 
   for (let i = 0; i < total; i++) {
@@ -103,36 +95,36 @@ async function _run(args) {
 
     log('[run] Q' + (i+1) + '/' + total + ' asking Gemini...');
     
-    // Render the progress bar based on remaining questions
     const barBuf = await renderSenAIProgressBar(i + 1, total, correct);
     const progressFile = new AttachmentBuilder(barBuf, { name: 'progress.png' });
 
-    const embed = buildProgressEmbed(accent, { 
+    const askPayload = buildProgressContainer(accent, { 
       quizTitle, index: i, total, q: normQ, correct, incorrect, status: 'asking AI…' 
     });
-
-    await interaction.editReply({
-      embeds: [embed],
-      files: [progressFile],
-      components: [runningButtons()]
-    }).catch(function() {});
-
-    let geminiResp = null;
-    let geminiFailed = false;
     
+    askPayload.files = [progressFile];
+    askPayload.flags = MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral;
+
+    await interaction.editReply(askPayload).catch(function() {});
+
+    let geminiResp = null, geminiFailed = false;
     try { geminiResp = await getAIanswer(normQ, session, { model: model }); } 
     catch (err) { geminiFailed = true; }
     
     if (!geminiResp || !geminiResp.answer) geminiFailed = true;
 
     if (geminiFailed) {
-      log('[run] AI failed. Aborting loop to prevent bad answers.');
+      log('[run] AI failed. Aborting.');
       noAnswer += (total - i); 
       
-      const errEmbed = new EmbedBuilder().setColor(0xED4245).setAuthor({ name: 'Vobo AI · halted' })
-        .setDescription('❌ **Gemini API rate limit reached.**\nPlease wait 60 seconds and press Start again.\n\nNo bad answers were submitted.');
+      const errContainer = new ContainerBuilder();
+      errContainer.setAccentColor(0xED4245);
+      errContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent('❌ **Gemini API rate limit reached.**\nPlease wait 60 seconds and press Start again.\n\nNo bad answers were submitted.'));
       
-      await interaction.editReply({ embeds: [errEmbed], components: [] }).catch(function() {});
+      await interaction.editReply({ 
+        flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral, 
+        components: [errContainer] 
+      }).catch(function() {});
       break; 
     }
 
@@ -148,15 +140,14 @@ async function _run(args) {
     const waitUntilUnix = Math.floor((Date.now() + waitMs) / 1000);
 
     log('[run] Q' + (i+1) + ' waiting ' + Math.round(waitMs/1000) + 's');
-    const waitEmbed = buildProgressEmbed(accent, { 
+    const waitPayload = buildProgressContainer(accent, { 
       quizTitle, index: i, total, q: normQ, waitUntilUnix, correct, incorrect, status: 'waiting before submit…' 
     });
+    
+    waitPayload.files = [progressFile];
+    waitPayload.flags = MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral;
 
-    await interaction.editReply({
-      embeds: [waitEmbed],
-      files: [progressFile],
-      components: [runningButtons()]
-    }).catch(function() {});
+    await interaction.editReply(waitPayload).catch(function() {});
 
     let waited = 0;
     while (waited < waitMs) {
