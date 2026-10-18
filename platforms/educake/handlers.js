@@ -58,13 +58,21 @@ export const eduHandlers = {
     const password = interaction.fields.getTextInputValue('password');
     const accent = accentFor(interaction.user.id);
 
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    // MUST include IsComponentsV2 here
+    await interaction.deferReply({ 
+      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral 
+    });
 
     const status = async function (line) {
-      const embed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Educake' })
-        .setDescription('Logging in — this panel updates live.')
-        .addFields({ name: 'Status', value: line });
-      await interaction.editReply({ embeds: [embed] }).catch(function () {});
+      const container = new ContainerBuilder();
+      container.setAccentColor(accent);
+      container.addTextDisplayComponents(new TextDisplayBuilder().setContent('### Vobo AI · Educake'));
+      container.addTextDisplayComponents(new TextDisplayBuilder().setContent('Logging in — this panel updates live.\n\n**Status**\n' + line));
+      
+      await interaction.editReply({ 
+        flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+        components: [container] 
+      }).catch(function () {});
     };
 
     await status('queued');
@@ -91,8 +99,13 @@ export const eduHandlers = {
           await updatePanelV2(interaction, panel);
         } catch (err) {
           log('[educake] login error: ' + err.message);
-          const embed = new EmbedBuilder().setColor(0xED4245).setAuthor({ name: 'Vobo AI · Educake' }).setDescription('❌ Login failed: ' + err.message);
-          await interaction.editReply({ embeds: [embed] }).catch(function () {});
+          const errContainer = new ContainerBuilder();
+          errContainer.setAccentColor(0xED4245);
+          errContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent('❌ Login failed: ' + err.message));
+          await interaction.editReply({ 
+            flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+            components: [errContainer] 
+          }).catch(function () {});
         }
       },
     });
@@ -159,8 +172,13 @@ export const eduHandlers = {
     const quizRow = (eduState.quizzes || []).find(q => q.attemptId === eduState.selectedAttemptId);
     if (!quizRow) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Selected quiz not found in session.' });
 
-    const ackEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Educake' }).setDescription('📥 Opening DM. Progress will stream there.');
-    await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [ackEmbed] });
+    const ackContainer = new ContainerBuilder();
+    ackContainer.setAccentColor(accent);
+    ackContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent('📥 Opening DM. Progress will stream there.'));
+    await interaction.reply({ 
+      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral, 
+      components: [ackContainer] 
+    });
 
     let progressMsg;
     try {
