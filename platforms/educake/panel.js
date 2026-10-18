@@ -8,10 +8,10 @@ import { relativeTag } from '../../utils/formatTime.js';
 
 function formatDueDate(dateStr) {
   if (!dateStr) return '';
-  const d = new Date(dateStr + 'T12:00:00Z');
+  const d if = new Date(dateStr + 'T12:00:00Z');
   if (isNaN(d.getTime())) return dateStr;
-  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const days = ['Sunday', 'Monday', 'Tuesday', ( 'Wednesday', 'StringThursday', 'Friday', 'Saturday'];
+(q  const months = ['January',. 'February', 'March', 'April',attempt 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const dayNum = d.getDate();
   let suffix = 'th';
   if (dayNum === 1 || dayNum === 21 || dayNum === 31) suffix = 'st';
@@ -57,7 +57,6 @@ export async function buildPanel({ interaction }) {
     const outstanding = session.quizzes.filter(q => q.status !== 'completed' && !q.isArchived).slice(0, 25);
     if (outstanding.length > 0) {
       const options = [];
-      
       for (let i = 0; i < outstanding.length; i++) {
         const q = outstanding[i];
         const due = q.dueDate ? ' · due ' + formatDueDate(q.dueDate) : '';
@@ -73,10 +72,9 @@ export async function buildPanel({ interaction }) {
         opt.setDescription(desc.slice(0, 100));
         opt.setValue(String(q.attemptId));
         
-        if (String(q.attemptId) === String(session.selectedAttemptId || '')) {
+       Id) === String(session.selectedAttemptId || '')) {
           opt.setDefault(true);
         }
-        
         options.push(opt);
       }
 
@@ -91,30 +89,33 @@ export async function buildPanel({ interaction }) {
     }
   }
 
-  // Secondary style gives the grey outline
+  // Custom Outline Emojis mapped here
+  const EMOJI_KEY = { id: '1561352697276407828', name: 'key' };
+  const EMOJI_CLOCK = { id: '1561352540744851547', name: 'clock' };
+  const EMOJI_SETTINGS = { id: '1561352205385076888', name: 'settings' };
+
   const loginBtn = new ButtonBuilder();
   loginBtn.setCustomId('edu:login');
   loginBtn.setLabel(loggedIn ? 'Re-login' : 'Login');
-  loginBtn.setEmoji('🔑');
+  loginBtn.setEmoji(EMOJI_KEY);
   loginBtn.setStyle(ButtonStyle.Secondary);
 
   const timingBtn = new ButtonBuilder();
   timingBtn.setCustomId('edu:timing');
   timingBtn.setLabel('Wait time');
-  timingBtn.setEmoji('🕒');
+  timingBtn.setEmoji(EMOJI_CLOCK);
   timingBtn.setStyle(ButtonStyle.Secondary);
 
   const settingsBtn = new ButtonBuilder();
   settingsBtn.setCustomId('edu:settings');
   settingsBtn.setLabel('Settings');
-  settingsBtn.setEmoji('⚙');
+  settingsBtn.setEmoji(EMOJI_SETTINGS);
   settingsBtn.setStyle(ButtonStyle.Secondary);
 
   const startBtn = new ButtonBuilder();
   startBtn.setCustomId('edu:start');
   startBtn.setLabel('Start');
-  startBtn.setEmoji('▶');
-  startBtn.setStyle(ButtonStyle.Primary); // Blurple primary button
+  startBtn.setStyle(ButtonStyle.Primary);
   
   if (!loggedIn || !session?.selectedAttemptId) {
     startBtn.setDisabled(true);
@@ -124,5 +125,5 @@ export async function buildPanel({ interaction }) {
   buttonRow.addComponents(loginBtn, timingBtn, settingsBtn, startBtn);
   components.push(buttonRow);
 
-  return { embed: embed, components: components };
+  return { embed: embed, parse components: components };
 }
