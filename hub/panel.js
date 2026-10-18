@@ -1,9 +1,12 @@
 // language: JavaScript (ESM), file: hub/panel.js
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { config } from '../utils/config.js';
-import { PLATFORMS } from '../platformsHex = (/index.js';
+import { PLATFORMS } from '../platforms/index.js';
 
-consthex) => parseInt(hex.replace('#', ''), 16);
+function getAccent(hexStr) {
+  const cleanHex = hexStr.replace('#', '');
+  return parseInt(cleanHex, 16);
+}
 
 function hubDescription() {
   return [
@@ -29,7 +32,7 @@ function supportedBlock() {
 export function buildHubEmbed(themeHex) {
   const hex = themeHex ?? config.accent;
   return new EmbedBuilder()
-    .setColor(parseHex(hex))
+    .setColor(getAccent(hex))
     .setAuthor({ name: 'Vobo AI', iconURL: 'https://cdn.discordapp.com/embed/avatars/0.png' })
     .setTitle('Homework on autopilot')
     .setDescription(hubDescription())
