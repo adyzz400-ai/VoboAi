@@ -43,7 +43,7 @@ export function buildHubEmbed(themeHex) {
 
 export function buildHubButtons() {
   const EMOJI_START = { id: '1561456743853326417', name: 'start' };
-  const EMOJI_TUTORIAL = { id: '1561458466550448280', name: 'tutorial' };
+  const EMOJI_TUTORIAL = { id: '1561462420130504835', name: 'tutorial' };
   const EMOJI_SETTINGS = { id: '1561352205385076888', name: 'settings' };
 
   const startBtn = new ButtonBuilder();
