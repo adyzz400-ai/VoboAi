@@ -5,10 +5,7 @@ import { resolvePlatformFromLoginValue, VALID_LOGIN_VALUES } from '../platforms/
 import { log, error } from '../utils/logger.js';
 
 export async function handleStartModal(interaction) {
-  // MUST include IsComponentsV2 here so the message is born as a V2 container
-  await interaction.deferReply({ 
-    flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral 
-  });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   let value = '';
   try {
@@ -30,7 +27,7 @@ export async function handleStartModal(interaction) {
     const panel = await platform.panel({ interaction, loginVariant: value });
     
     await interaction.editReply({ 
-      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+      embeds: [panel.embed],
       components: panel.components
     });
   } catch (err) {
