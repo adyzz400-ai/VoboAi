@@ -90,6 +90,7 @@ export async function buildPanel({ interaction }) {
     }
   }
   
+  const EMOJI_START = { id: '1561456743853326417', name: 'start' };
   const EMOJI_KEY = { id: '1561352697276407828', name: 'key' };
   const EMOJI_CLOCK = { id: '1561352540744851547', name: 'clock' };
   const EMOJI_SETTINGS = { id: '1561352205385076888', name: 'settings' };
@@ -115,6 +116,7 @@ export async function buildPanel({ interaction }) {
   const startBtn = new ButtonBuilder();
   startBtn.setCustomId('edu:start');
   startBtn.setLabel('Start');
+  startBtn.setEmoji(EMOJI_START);
   startBtn.setStyle(ButtonStyle.Primary);
   
   if (!loggedIn || !session?.selectedAttemptId) {
