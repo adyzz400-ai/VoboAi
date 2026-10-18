@@ -1,12 +1,12 @@
 // language: JavaScript (ESM), file: platforms/educake/handlers.js
-import { EmbedBuilder, MessageFlags, AttachmentBuilder, ContainerBuilder, TextDisplayBuilder } from 'discord.js';
+import { EmbedBuilder, MessageFlags, AttachmentBuilder } from 'discord.js';
 import { log, warn } from '../../utils/logger.js';
 import { getPlatform, setPlatform, patchPlatform, getTheme } from '../../hub/sessionStore.js';
 import { buildPanel } from './panel.js';
 import { buildEducakeLoginModal } from './loginModal.js';
 import { buildTimingModal } from './timingModal.js';
 import { buildEducakeSettingsModal } from './settingsModal.js';
-import { buildVariantPanel } from './variantPicker.js';
+import { buildVariantEmbed, buildVariantSelect } from './variantPicker.js';
 import { educakeLogin } from './login.js';
 import { listQuizzes, openAttempt } from './quizzes.js';
 import { runAttempt } from './autocompleter.js';
@@ -25,20 +25,13 @@ function validWaits(min, max) {
   return true;
 }
 
-async function updatePanelV2(interaction, panel) {
-  await interaction.editReply({
-    flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-    components: panel.components
-  });
-}
-
 export const eduHandlers = {
   async 'edu:login'(interaction) {
     const accent = accentFor(interaction.user.id);
-    const panel = buildVariantPanel(accent);
     return interaction.reply({ 
-      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral, 
-      components: panel.components 
+      flags: MessageFlags.Ephemeral, 
+      embeds: [buildVariantEmbed(accent)], 
+      components: [buildVariantSelect()] 
     });
   },
 
@@ -58,21 +51,13 @@ export const eduHandlers = {
     const password = interaction.fields.getTextInputValue('password');
     const accent = accentFor(interaction.user.id);
 
-    // MUST include IsComponentsV2 here
-    await interaction.deferReply({ 
-      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral 
-    });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const status = async function (line) {
-      const container = new ContainerBuilder();
-      container.setAccentColor(accent);
-      container.addTextDisplayComponents(new TextDisplayBuilder().setContent('### Vobo AI · Educake'));
-      container.addTextDisplayComponents(new TextDisplayBuilder().setContent('Logging in — this panel updates live.\n\n**Status**\n' + line));
-      
-      await interaction.editReply({ 
-        flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-        components: [container] 
-      }).catch(function () {});
+      const embed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Educake' })
+        .setDescription('Logging in — this panel updates live.')
+        .addFields({ name: 'Status', value: line });
+      await interaction.editReply({ embeds: [embed] }).catch(function () {});
     };
 
     await status('queued');
@@ -96,16 +81,11 @@ export const eduHandlers = {
           } catch (err) { warn('[educake] quiz list failed: ' + err.message); }
 
           const panel = await buildPanel({ interaction: interaction });
-          await updatePanelV2(interaction, panel);
+          await interaction.editReply({ embeds: [panel.embed], components: panel.components });
         } catch (err) {
           log('[educake] login error: ' + err.message);
-          const errContainer = new ContainerBuilder();
-          errContainer.setAccentColor(0xED4245);
-          errContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent('❌ Login failed: ' + err.message));
-          await interaction.editReply({ 
-            flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-            components: [errContainer] 
-          }).catch(function () {});
+          const embed = new EmbedBuilder().setColor(0xED4245).setAuthor({ name: 'Vobo AI · Educake' }).setDescription('❌ Login failed: ' + err.message);
+          await interaction.editReply({ embeds: [embed] }).catch(function () {});
         }
       },
     });
@@ -128,7 +108,7 @@ export const eduHandlers = {
     patchPlatform(interaction.user.id, 'educake', { waits: { min: min, max: max } });
     await interaction.deferUpdate();
     const panel = await buildPanel({ interaction: interaction });
-    await updatePanelV2(interaction, panel);
+    await interaction.editReply({ embeds: [panel.embed], components: panel.components });
   },
 
   async 'edu:settings'(interaction) {
@@ -149,7 +129,7 @@ export const eduHandlers = {
     patchPlatform(interaction.user.id, 'educake', { waits: { min: min, max: max }, includeImages: includeImages, model: model });
     await interaction.deferUpdate();
     const panel = await buildPanel({ interaction: interaction });
-    await updatePanelV2(interaction, panel);
+    await interaction.editReply({ embeds: [panel.embed], components: panel.components });
   },
 
   async 'edu:quiz'(interaction) {
@@ -157,7 +137,7 @@ export const eduHandlers = {
     patchPlatform(interaction.user.id, 'educake', { selectedAttemptId: attemptId });
     await interaction.deferUpdate();
     const panel = await buildPanel({ interaction: interaction });
-    await updatePanelV2(interaction, panel);
+    await interaction.editReply({ embeds: [panel.embed], components: panel.components });
   },
 
   async 'edu:start'(interaction) {
@@ -172,25 +152,14 @@ export const eduHandlers = {
     const quizRow = (eduState.quizzes || []).find(q => q.attemptId === eduState.selectedAttemptId);
     if (!quizRow) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Selected quiz not found in session.' });
 
-    const ackContainer = new ContainerBuilder();
-    ackContainer.setAccentColor(accent);
-    ackContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent('📥 Opening DM. Progress will stream there.'));
-    await interaction.reply({ 
-      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral, 
-      components: [ackContainer] 
-    });
+    const ackEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Educake' }).setDescription('📥 Opening DM. Progress will stream there.');
+    await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [ackEmbed] });
 
     let progressMsg;
     try {
       const dmChannel = await interaction.user.createDM();
-      const startContainer = new ContainerBuilder();
-      startContainer.setAccentColor(accent);
-      startContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent('⏳ Waiting for queue slot…'));
-      
-      progressMsg = await dmChannel.send({ 
-        flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-        components: [startContainer] 
-      });
+      const dmEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Educake' }).setDescription('⏳ Waiting for queue slot…');
+      progressMsg = await dmChannel.send({ embeds: [dmEmbed] });
     } catch (err) {
       return interaction.editReply({ content: 'Could not open DMs. Please check your privacy settings.' });
     }
@@ -215,29 +184,21 @@ export const eduHandlers = {
           const pdf = await buildSessionPdf(summary);
           const pct = summary.total > 0 ? Math.round((summary.correct / summary.total) * 100) : 0;
           
-          const finalContainer = new ContainerBuilder();
-          finalContainer.setAccentColor(accent);
-          finalContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent('### Vobo AI · session complete'));
-          finalContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-            '**Quiz**\n' + summary.quizTitle + '\n\n' +
-            '**Score**\n' + summary.correct + ' / ' + summary.total + ' · ' + pct + '%\n\n' +
-            '**Breakdown**\n✓ ' + summary.correct + ' correct   ✗ ' + summary.incorrect + ' incorrect'
-          ));
+          const finalEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · session complete' })
+            .addFields(
+              { name: 'Quiz', value: summary.quizTitle },
+              { name: 'Score', value: summary.correct + ' / ' + summary.total + ' · ' + pct + '%' },
+              { name: 'Breakdown', value: '✓ ' + summary.correct + ' ✗ ' + summary.incorrect + ' ⚠ ' + summary.noAnswer }
+            );
 
           await progressMsg.edit({
-            flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-            components: [finalContainer],
+            embeds: [finalEmbed],
             files: [new AttachmentBuilder(pdf, { name: 'session-summary.pdf' })]
           });
         } catch (e) {
           log('[run] FATAL: ' + e.message);
-          const errContainer = new ContainerBuilder();
-          errContainer.setAccentColor(0xED4245);
-          errContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent('Run failed: ' + e.message));
-          await progressMsg.edit({ 
-            flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-            components: [errContainer] 
-          }).catch(() => {});
+          const errEmbed = new EmbedBuilder().setColor(0xED4245).setDescription('Run failed: ' + e.message);
+          await progressMsg.edit({ embeds: [errEmbed] }).catch(() => {});
         }
       },
     });
