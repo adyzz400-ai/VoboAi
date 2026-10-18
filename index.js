@@ -10,15 +10,9 @@ import { buildHubSettingsModal, parseHubSettings } from './hub/settingsModal.js'
 import { buildTutorialEmbed } from './hub/tutorial.js';
 import { dispatch as dispatchButton, register } from './handlers/buttonRouter.js';
 import { handleStartModal } from './handlers/startModalSubmit.js';
-import { buildHubEmbed, buildHubButtons, buildHubThemeRow } from './hub/panel.js';
+import { buildHubEmbed, buildHubButtons } from './hub/panel.js';
 import { eduHandlers } from './platforms/educake/handlers.js';
 import { autopostHub } from './hub/autopost.js';
-import { getTheme, setTheme } from './hub/sessionStore.js';
-
-// Catch all unhandled promise rejections to prevent the process from crashing
-process.on('unhandledRejection', (err) => {
-  error('[process] Unhandled rejection', err);
-});
 
 const PORT = process.env.PORT || 10000;
 http.createServer((req, res) => {
@@ -33,22 +27,6 @@ register('hub', async (interaction) => {
   if (action === 'settings') return interaction.showModal(buildHubSettingsModal());
   if (action === 'tutorial') return interaction.reply({ embeds: [buildTutorialEmbed()], flags: MessageFlags.Ephemeral });
   
-  if (action === 'theme') {
-    const hex = getTheme(interaction.user.id);
-    return interaction.reply({ 
-      embeds: [buildHubEmbed(hex)], 
-      components: [buildHubThemeRow(hex)], 
-      flags: MessageFlags.Ephemeral 
-    });
-  }
-  
-  if (action === 'back') {
-    const hex = getTheme(interaction.user.id);
-    return interaction.update({ 
-      embeds: [buildHubEmbed(hex)], 
-      components: [buildHubButtons()] 
-    });
-  }
   warn(`[hub] unhandled action ${action}`);
 });
 
@@ -89,18 +67,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isStringSelectMenu()) {
       if (interaction.customId === 'edu:quiz') return eduHandlers['edu:quiz'](interaction);
       if (interaction.customId === 'edu:login:variant') return eduHandlers['edu:login:variant'](interaction);
-
-      if (interaction.customId === 'hub:theme:pick') {
-        const hex = interaction.values[0];
-        setTheme(interaction.user.id, hex);
-        
-        await interaction.update({
-          embeds: [buildHubEmbed(hex)],
-          components: [buildHubThemeRow(hex)]
-        });
-        log(`[theme] ${interaction.user.id} -> #${hex}`);
-        return;
-      }
       return;
     }
 
