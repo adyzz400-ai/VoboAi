@@ -5,7 +5,10 @@ import { resolvePlatformFromLoginValue, VALID_LOGIN_VALUES } from '../platforms/
 import { log, error } from '../utils/logger.js';
 
 export async function handleStartModal(interaction) {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  // MUST include IsComponentsV2 here so the message is born as a V2 container
+  await interaction.deferReply({ 
+    flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral 
+  });
 
   let value = '';
   try {
