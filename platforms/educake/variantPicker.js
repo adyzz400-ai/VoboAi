@@ -1,43 +1,50 @@
 // language: JavaScript (ESM), file: platforms/educake/variantPicker.js
-import { ContainerBuilder, TextDisplayBuilder, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } from 'discord.js';
+import { 
+  EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder 
+} from 'discord.js';
 
 const EMOJI = {
-  educake: { id: '1560718324600668200', name: 'educake' },
-  google: { id: '1560718367772381284', name: 'google' },
+  educake:   { id: '1560718324600668200', name: 'educake' },
+  google:    { id: '1560718367772381284', name: 'google' },
   microsoft: { id: '1560718420431872050', name: 'microsoft' },
 };
 
-export function buildVariantPanel(accent) {
-  const container = new ContainerBuilder();
-  container.setAccentColor(accent);
-  
-  const text = '### Choose your sign-in method\n' +
+export function buildVariantEmbed(accent) {
+  const embed = new EmbedBuilder();
+  embed.setColor(accent);
+  embed.setAuthor({ name: 'Vobo AI · Educake' });
+  embed.setTitle('Choose your sign-in method');
+  embed.setDescription(
     'Educake lets schools choose how students log in. Pick whichever one your school uses.\n\n' +
-    '**Username** is live now. **Microsoft** and **Google** are being wired up next.';
+    '**Username** is live now. **Microsoft** and **Google** are being wired up next.'
+  );
+  return embed;
+}
+
+export function buildVariantSelect() {
+  const select = new StringSelectMenuBuilder();
+  select.setCustomId('edu:login:variant');
+  select.setPlaceholder('Pick a login method…');
   
-  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(text));
-  
-  const select = new StringSelectMenuBuilder()
-    .setCustomId('edu:login:variant')
-    .setPlaceholder('Pick a login method…')
-    .addOptions(
-      new StringSelectMenuOptionBuilder()
+  select.addOptions(
+    new StringSelectMenuOptionBuilder()
       .setLabel('Educake')
       .setDescription('Standard Educake username or email + password')
       .setValue('educake')
       .setEmoji(EMOJI.educake),
-      new StringSelectMenuOptionBuilder()
+    new StringSelectMenuOptionBuilder()
       .setLabel('Microsoft')
       .setDescription('Sign in with a Microsoft school account — coming soon')
       .setValue('educake-ms')
       .setEmoji(EMOJI.microsoft),
-      new StringSelectMenuOptionBuilder()
+    new StringSelectMenuOptionBuilder()
       .setLabel('Google')
       .setDescription('Sign in with a Google Workspace account — coming soon')
       .setValue('educake-google')
-      .setEmoji(EMOJI.google),
-    );
-  
-  container.addActionRowComponents(new ActionRowBuilder().addComponents(select));
-  return { components: [container] };
+      .setEmoji(EMOJI.google)
+  );
+
+  const row = new ActionRowBuilder();
+  row.addComponents(select);
+  return row;
 }
