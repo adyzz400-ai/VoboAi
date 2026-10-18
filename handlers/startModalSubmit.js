@@ -11,7 +11,6 @@ export async function handleStartModal(interaction) {
   try {
     value = interaction.fields.getTextInputValue('platform').trim().toLowerCase();
   } catch (err) {
-    log('[start] No platform field provided, defaulting to educake');
     value = 'educake';
   }
 
@@ -26,8 +25,9 @@ export async function handleStartModal(interaction) {
   
   try {
     const panel = await platform.panel({ interaction, loginVariant: value });
+    
     await interaction.editReply({ 
-      embeds: [panel.embed],
+      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
       components: panel.components
     });
   } catch (err) {
