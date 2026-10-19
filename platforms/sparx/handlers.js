@@ -1,0 +1,175 @@
+// language: JavaScript (ESM), file: platforms/sparx/handlers.js
+import { EmbedBuilder, MessageFlags } from 'discord.js';
+import { log, warn } from '../../utils/logger.js';
+import { getPlatform, setPlatform, patchPlatform, getTheme } from '../../hub/sessionStore.js';
+import { buildPanel } from './panel.js';
+import { buildSparxVariantEmbed, buildSparxVariantSelect } from './variantPicker.js';
+import { buildSparxLoginModal } from './loginModal.js';
+import { buildSparxTimingModal } from './timingModal.js';
+import { sparxLogin } from './login.js';
+import { runSparxTask } from './autocompleter.js';
+import { queue } from '../../queue/index.js';
+import { Task } from '../../queue/task.js';
+import { config } from '../../utils/config.js';
+import { SparxClient } from './client.js';
+import { parseHomeworkList } from './parser.js';
+
+function accentFor(userId) {
+  return parseInt(getTheme(userId).replace('#', ''), 16) || 0x0A78FF;
+}
+
+export const sparxHandlers = {
+  async 'sparx:login'(interaction) {
+    const accent = accentFor(interaction.user.id);
+    return interaction.reply({ 
+      flags: MessageFlags.Ephemeral, 
+      embeds: [buildSparxVariantEmbed(accent)], 
+      components: [buildSparxVariantSelect()] 
+    });
+  },
+
+  async 'sparx:login:variant'(interaction) {
+    const choice = interaction.values[0];
+    if (choice !== 'sparx') {
+      const embed = new EmbedBuilder().setColor(0xEAB308).setDescription('**Social login** is coming soon. Use Sparx username for now.');
+      return interaction.update({ embeds: [embed], components: [] });
+    }
+    return interaction.showModal(buildSparxLoginModal());
+  },
+
+  async 'sparx:login:submit'(interaction) {
+    const school = interaction.fields.getTextInputValue('school').trim();
+    const username = interaction.fields.getTextInputValue('username').trim();
+    const password = interaction.fields.getTextInputValue('password');
+    const accent = accentFor(interaction.user.id);
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    const status = async function (line) {
+      const embed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Sparx' })
+        .setDescription('Logging in — this panel updates live.')
+        .addFields({ name: 'Status', value: line });
+      await interaction.editReply({ embeds: [embed] }).catch(() => {});
+    };
+
+    await status('queued');
+
+    const task = new Task({
+      userId: interaction.user.id, kind: 'login', timeoutMs: 5 * 60 * 1000,
+      run: async function () {
+        try {
+          const session = await sparxLogin({ school, username, password, onStatus: status });
+          setPlatform(interaction.user.id, 'sparx', {
+            username: username, password: password, school: school,
+            jwt: session.jwt, sessionId: session.sessionId, cookie: session.cookie,
+            jwtExpUnix: Math.floor(Date.now() / 1000) + 3600,
+            waits: { min: config.waits.min, max: config.waits.max },
+            selectedTaskId: null, tasks: null, startedAt: Date.now()
+          });
+
+          await status('fetching tasks');
+          try {
+            const client = new SparxClient(session);
+            const listBuffer = await client.getHomeworkList();
+            const tasks = parseHomeworkList(listBuffer);
+            patchPlatform(interaction.user.id, 'sparx', { tasks: tasks });
+          } catch (err) {
+            warn('[sparx] task list failed: ' + err.message);
+            patchPlatform(interaction.user.id, 'sparx', { 
+              tasks: [{ taskId: '6c046f6a-b85b-4631-87b6-c1b912a53f5b', packageId: '1beab238-c09e-49e9-8dbb-e489cce37f7f', title: 'Homework', questionCount: 10, correctCount: 0, status: 'new' }] 
+            });
+          }
+
+          const panel = await buildPanel({ interaction: interaction });
+          await interaction.editReply({ embeds: [panel.embed], components: panel.components });
+        } catch (err) {
+          log('[sparx] login error: ' + err.message);
+          const embed = new EmbedBuilder().setColor(0xED4245).setAuthor({ name: 'Vobo AI · Sparx' }).setDescription('❌ Login failed: ' + err.message);
+          await interaction.editReply({ embeds: [embed] }).catch(() => {});
+        }
+      },
+    });
+    queue.enqueue(task);
+  },
+
+  async 'sparx:timing'(interaction) {
+    return interaction.showModal(buildSparxTimingModal(getPlatform(interaction.user.id, 'sparx')));
+  },
+
+  async 'sparx:timing:submit'(interaction) {
+    const min = Number(interaction.fields.getTextInputValue('min'));
+    const max = Number(interaction.fields.getTextInputValue('max'));
+    if (min < 1 || max < 1 || max > 200 || min > max) {
+      const embed = new EmbedBuilder().setColor(0xED4245).setDescription('Invalid wait window.');
+      return interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed] });
+    }
+    patchPlatform(interaction.user.id, 'sparx', { waits: { min, max } });
+    await interaction.deferUpdate();
+    const panel = await buildPanel({ interaction: interaction });
+    await interaction.editReply({ embeds: [panel.embed], components: panel.components });
+  },
+
+  async 'sparx:task'(interaction) {
+    const taskId = interaction.values[0];
+    patchPlatform(interaction.user.id, 'sparx', { selectedTaskId: taskId });
+    await interaction.deferUpdate();
+    const panel = await buildPanel({ interaction: interaction });
+    await interaction.editReply({ embeds: [panel.embed], components: panel.components });
+  },
+
+  async 'sparx:start'(interaction) {
+    const userId = interaction.user.id;
+    const session = getPlatform(userId, 'sparx');
+    const accent = accentFor(userId);
+
+    if (!session?.jwt) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Session expired. Re-login.' });
+    if (!session.selectedTaskId) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Pick a task from the dropdown first.' });
+
+    const taskRow = (session.tasks || []).find(t => String(t.taskId) === String(session.selectedTaskId));
+    if (!taskRow) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Selected task not found.' });
+
+    const ackEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Sparx' }).setDescription('📥 Opening DM. Progress will stream there.');
+    await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [ackEmbed] });
+
+    let progressMsg;
+    try {
+      const dmChannel = await interaction.user.createDM();
+      const dmEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Sparx' }).setDescription('⏳ Waiting for queue slot…');
+      progressMsg = await dmChannel.send({ embeds: [dmEmbed] });
+    } catch (err) {
+      return interaction.editReply({ content: 'Could not open DMs.' });
+    }
+
+    const signal = { cancelled: false };
+    const task = new Task({
+      userId: userId, kind: 'run', timeoutMs: 30 * 60 * 1000,
+      run: async function () {
+        try {
+          const summary = await runSparxTask({
+            session, 
+            packageId: taskRow.packageId,
+            taskId: taskRow.taskId,
+            taskName: taskRow.title,
+            interaction: { editReply: (opts) => progressMsg.edit(opts) },
+            signal,
+            onLog: (txt) => log('[sparx] ' + txt)
+          });
+
+          const finalEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · session complete' })
+            .setDescription(`Task finished!\nScore: ${summary.correct} / ${summary.total}`);
+          
+          await progressMsg.edit({ embeds: [finalEmbed] });
+        } catch (e) {
+          log('[sparx] FATAL: ' + e.message);
+          const errEmbed = new EmbedBuilder().setColor(0xED4245).setDescription('Run failed: ' + e.message);
+          await progressMsg.edit({ embeds: [errEmbed] }).catch(() => {});
+        }
+      },
+    });
+
+    const currentState = getPlatform(userId, 'sparx');
+    currentState.activeSignal = signal;
+    setPlatform(userId, 'sparx', currentState);
+    queue.enqueue(task);
+  }
+};
