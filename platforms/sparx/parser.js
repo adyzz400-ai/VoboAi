@@ -1,76 +1,79 @@
-// language: JavaScript (ESM), file: platforms/sparx/parser.js
-export function parseSparxQuestion(buffer) {
-  const str = buffer.toString('utf8');
-  const start = str.indexOf('{"layout"');
-  const end = str.lastIndexOf('}');
-  
-  if (start === -1 || end === -1) throw new Error('Could not find JSON layout');
-  
-  const data = JSON.parse(str.slice(start, end + 1));
-  const actMatch = str.match(/\/activities\/([a-z0-9-]+)/);
-  const activityId = actMatch ? actMatch[1] : null;
-
-  if (data.layout.type.includes('multi-part') || data.layout.type.includes('interleaved-question-answer')) {
-    const prompt = data.layout.content[1].content[0].content[0].text;
-    const cardsObj = data.layout.content[0].content;
-    const choices = cardsObj.map(c => ({ ref: c.ref, text: c.content[0].text }));
-    return { prompt, choices, activityId, type: 'slot' };
-  }
-
-  const prompt = data.layout.content[0].content[0].content[0].text;
-  const choicesObj = data.layout.content[1].content[0].content;
-  const choices = choicesObj.map(c => ({ ref: c.ref, text: c.content[0].text }));
-  return { prompt, choices, activityId, type: 'multiple' };
-}
-
-export function parseBookworkCode(buffer) {
-  const str = buffer.toString('utf8');
-  const match = str.match(/<choice>(.*?)<\/choice>/) || str.match(/<number>(.*?)<\/number>/);
-  if (match) return match[1];
-  return null;
-}
-
 export function parseHomeworkList(buffer) {
   const str = buffer.toString('utf8');
   const packages = [];
-  
-  const pkgBlocks = str.split(/-packages\//).slice(1);
 
-  for (const block of pkgBlocks) {
-    const pkgIdMatch = block.match(/^([0-9a-f-]{36})/);
-    if (!pkgIdMatch) continue;
-    const packageId = pkgIdMatch[1];
+  // split on the package marker that appears in the grpc blob
+  const blocks = str.split(/-packages\//);
+  if (blocks.length < 2) return packages;
 
-    const assignMatch = block.match(/\*0assignments\/([0-9a-f-]{36})/);
-    const assignmentId = assignMatch ? assignMatch[1] : packageId;
+  for (let i = 1; i < blocks.length; i++) {
+    const block = blocks[i];
 
-    const taskRegex = /tasks\/([0-9a-f-]{36})(.*?)(?=tasks\/|items\/|$)/gs;
-    let taskMatch;
+    // package uuid is the first 36-char hex after the split
+    const pkgMatch = block.match(/^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+    if (!pkgMatch) continue;
+    const packageId = pkgMatch[1];
+
+    // assignment id (preferred for later GetActivity calls)
+    let assignmentId = packageId;
+    const assignMatch = block.match(/assignments\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+    if (assignMatch) assignmentId = assignMatch[1];
+
+    // title — prefer explicit "Homework" label, fall back to package
+    let title = 'Homework';
+    if (block.includes('Homework')) title = 'Homework';
+
+    // extract every task uuid + the chunk that follows it
     const tasks = [];
+    const taskRegex = /tasks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi;
+    let m;
+    const taskIds = [];
+    while ((m = taskRegex.exec(block)) !== null) {
+      taskIds.push({ id: m[1], index: m.index });
+    }
 
-    while ((taskMatch = taskRegex.exec(block)) !== null) {
-      const taskId = taskMatch[1];
-      const taskChunk = taskMatch[2];
-      
-      let title = 'Task';
+    for (let t = 0; t < taskIds.length; t++) {
+      const start = taskIds[t].index;
+      const end = t + 1 < taskIds.length ? taskIds[t + 1].index : block.length;
+      const chunk = block.slice(start, end);
+
+      let taskTitle = 'Task';
       let isTimesTables = false;
       let isFlashcards = false;
 
-      if (taskChunk.includes('Times Tables')) { title = 'Times Tables'; isTimesTables = true; }
-      else if (taskChunk.includes('Flashcards')) { title = 'Flashcards'; isFlashcards = true; }
-      else {
-        const nameMatch = taskChunk.match(/(Task \d+|Homework)/);
-        if (nameMatch) title = nameMatch[1];
+      if (/Times\s*Tables/i.test(chunk)) {
+        taskTitle = 'Times Tables';
+        isTimesTables = true;
+      } else if (/Flashcards?/i.test(chunk)) {
+        taskTitle = 'Flashcards';
+        isFlashcards = true;
+      } else {
+        const nameMatch = chunk.match(/Task\s*(\d+)/i);
+        if (nameMatch) taskTitle = 'Task ' + nameMatch[1];
+        else if (/Homework/i.test(chunk)) taskTitle = 'Homework';
       }
 
-      tasks.push({ taskId, title, isTimesTables, isFlashcards });
+      tasks.push({
+        taskId: taskIds[t].id,
+        title: taskTitle,
+        isTimesTables,
+        isFlashcards
+      });
     }
 
-    let dueDate = new Date(Date.now() + 86400000 * 7).toISOString();
-    
+    // due date — look for common patterns, else +7 days
+    let dueDate = new Date(Date.now() + 7 * 86400000).toISOString();
+    const dueMatch = block.match(/(\d{4}-\d{2}-\d{2})/);
+    if (dueMatch) {
+      try {
+        dueDate = new Date(dueMatch[1]).toISOString();
+      } catch (_) {}
+    }
+
     packages.push({
-      packageId: assignmentId,
-      title: 'Homework',
+      packageId: assignmentId,   // use assignment id for later API calls
+      rawPackageId: packageId,
+      title: title,
       dueDate: dueDate,
       accuracy: '0%',
       tasks: tasks
