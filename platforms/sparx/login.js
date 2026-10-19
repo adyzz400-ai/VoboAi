@@ -15,7 +15,13 @@ export async function sparxLogin({ school, username, password, onStatus }) {
     browser = await puppeteerExtra.launch({
       executablePath: config.chromePath,
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--single-process', '--no-zygote'],
+      args: [
+        '--no-sandbox', 
+        '--disable-setuid-sandbox', 
+        '--disable-dev-shm-usage', 
+        '--disable-gpu',
+        '--disable-software-rasterizer'
+      ],
     });
     page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
@@ -24,11 +30,12 @@ export async function sparxLogin({ school, username, password, onStatus }) {
     await page.goto('https://maths.sparx-learning.com/', { waitUntil: 'networkidle2', timeout: 30000 });
 
     step('searching for school: ' + school);
-    await page.waitForSelector('input[type="text"]', { timeout: 10000 });
+    await page.waitForSelector('input[type="text"]', { timeout: 15000 });
     await page.click('input[type="text"]');
     await page.type('input[type="text"]', school, { delay: 50 });
     
-    await new Promise(r => setTimeout(r, 2000));
+    // Wait for the dropdown to populate
+    await new Promise(r => setTimeout(r, 2500));
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
     
