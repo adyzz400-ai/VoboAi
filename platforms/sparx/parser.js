@@ -33,56 +33,51 @@ export function parseBookworkCode(buffer) {
 export function parseHomeworkList(buffer) {
   const str = buffer.toString('utf8');
   
-  // Find the main package ID
-  const pkgMatch = str.match(/packages\/([0-9a-f-]{36})/);
-  if (!pkgMatch) return [];
-  const packageId = pkgMatch[1];
-
-  // Find all tasks inside the binary blob
-  // The regex finds "tasks/uuid", then we look at the 50 chars after it for "Task 1", "Flashcards", etc.
-  const taskRegex = /tasks\/([0-9a-f-]{36})/g;
+  // Split by package to find each homework
+  const pkgRegex = /packages\/([0-9a-f-]{36})/g;
   let match;
-  const tasks = [];
+  const packages = [];
 
-  while ((match = taskRegex.exec(str)) !== null) {
-    const taskId = match[1];
+  while ((match = pkgRegex.exec(str)) !== null) {
+    const packageId = match[1];
+    const chunk = str.slice(match.index, match.index + 1500); // Look ahead 1500 chars for tasks
     
-    // Look ahead to find the task name
-    const chunk = str.slice(match.index, match.index + 150);
-    
-    let title = 'Task';
-    let isTimesTables = false;
-    let isFlashcards = false;
+    // Find the assignment ID for this package
+    const assignMatch = chunk.match(/assignments\/([0-9a-f-]{36})/);
+    const assignmentId = assignMatch ? assignMatch[1] : packageId;
 
-    if (chunk.includes('Times Tables')) {
-      title = 'Times Tables';
-      isTimesTables = true;
-    } else if (chunk.includes('Flashcards')) {
-      title = 'Flashcards';
-      isFlashcards = true;
+    // Find all tasks (items) inside this chunk
+    const itemRegex = /items\/([0-9a-f-]{36})/g;
+    let itemMatch;
+    const tasks = [];
+    
+    // If there are no items, we still create a dummy task so it doesn't break
+    if (!chunk.match(/items\//)) {
+       tasks.push({ taskId: packageId, title: 'Task 1', isTimesTables: false, isFlashcards: false });
     } else {
-      const matchTitle = chunk.match(/(Task \d+)/);
-      if (matchTitle) title = matchTitle[1];
+       while ((itemMatch = itemRegex.exec(chunk)) !== null) {
+         const taskId = itemMatch[1];
+         // Default to Task 1, 2, 3, etc based on the order
+         tasks.push({ taskId, title: 'Task ' + (tasks.length + 1), isTimesTables: false, isFlashcards: false });
+       }
     }
 
-    tasks.push({ taskId, title, isTimesTables, isFlashcards });
+    // Extract due date and accuracy (defaults if not found)
+    let dueDate = new Date(Date.now() + 86400000 * 7).toISOString();
+    let accuracy = '0%';
+    
+    const dateMatch = chunk.match(/(\d{4}-\d{2}-\d{2})/);
+    if (dateMatch) dueDate = dateMatch[1];
+
+    packages.push({
+      packageId: assignmentId, // Use assignmentId for the API call
+      title: 'Homework',
+      dueDate: dueDate,
+      accuracy: accuracy,
+      tasks: tasks
+    });
   }
 
-  // Deduplicate (the binary sometimes repeats the same task ID for internal references)
-  const uniqueTasks = tasks.filter((v, i, a) => a.findIndex(t => t.taskId === v.taskId) === i);
-
-  // Try to find due date and accuracy in the JSON strings
-  let dueDate = new Date(Date.now() + 86400000 * 7).toISOString(); // Default 1 week
-  let accuracy = '0%';
-  
-  const dueMatch = str.match(/"dueDate":"(.*?)"/);
-  if (dueMatch) dueDate = dueMatch[1];
-
-  return [{
-    packageId,
-    title: 'Homework due ' + new Date(dueDate).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }),
-    dueDate: dueDate,
-    accuracy: accuracy,
-    tasks: uniqueTasks
-  }];
+  // Deduplicate packages
+  return packages.filter((v, i, a) => a.findIndex(t => t.packageId === v.packageId) === i);
 }
