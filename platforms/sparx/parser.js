@@ -110,55 +110,60 @@ export function parseHomeworkList(buffer) {
       /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
     );
     if (!pkgMatch) continue;
-    const packageId = pkgMatch[1];
+    const packageId = pkgMatch[1].toLowerCase();
 
     let assignmentId = packageId;
     const assignMatch = block.match(
       /assignments\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
     );
-    if (assignMatch) assignmentId = assignMatch[1];
+    if (assignMatch) assignmentId = assignMatch[1].toLowerCase();
 
-    const taskIdSet = new Set();
+    // every uuid in this block
+    const allIds = [];
+    let m;
+    const re = new RegExp(uuidRe.source, 'gi');
+    while ((m = re.exec(block)) !== null) {
+      allIds.push(m[0].toLowerCase());
+    }
+
+    // drop package + assignment → rest are task candidates
+    const skip = new Set([packageId, assignmentId]);
+    const taskIds = [];
+    const seen = new Set();
+    for (const id of allIds) {
+      if (skip.has(id)) continue;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      taskIds.push(id);
+    }
+
+    // also catch explicit tasks/ paths
     const taskRe =
       /tasks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi;
     let tm;
     while ((tm = taskRe.exec(block)) !== null) {
-      taskIdSet.add(tm[1].toLowerCase());
-    }
-
-    if (taskIdSet.size === 0) {
-      const loose = block.match(
-        /task[^0-9a-f]{0,20}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi
-      );
-      if (loose) {
-        for (const hit of loose) {
-          const id = hit.match(uuidRe);
-          if (id) taskIdSet.add(id[0].toLowerCase());
-        }
+      const id = tm[1].toLowerCase();
+      if (!seen.has(id)) {
+        seen.add(id);
+        taskIds.push(id);
       }
     }
 
     const tasks = [];
     let taskIndex = 1;
-    for (const tid of taskIdSet) {
+    for (const tid of taskIds) {
       const idx = block.toLowerCase().indexOf(tid);
       const window =
-        idx >= 0 ? block.slice(Math.max(0, idx - 80), idx + 80) : '';
+        idx >= 0 ? block.slice(Math.max(0, idx - 100), idx + 100) : block;
 
       let title = 'Task ' + taskIndex;
       let isTimesTables = false;
       let isFlashcards = false;
 
-      if (
-        /times\s*tables/i.test(window) ||
-        /times\s*tables/i.test(block)
-      ) {
+      if (/times\s*tables/i.test(window)) {
         title = 'Times Tables';
         isTimesTables = true;
-      } else if (
-        /flash\s*cards?/i.test(window) ||
-        /flash\s*cards?/i.test(block)
-      ) {
+      } else if (/flash\s*cards?/i.test(window)) {
         title = 'Flashcards';
         isFlashcards = true;
       } else {
@@ -173,15 +178,6 @@ export function parseHomeworkList(buffer) {
         isFlashcards: isFlashcards
       });
       taskIndex++;
-    }
-
-    if (tasks.length === 0) {
-      tasks.push({
-        taskId: packageId,
-        title: 'Task 1',
-        isTimesTables: false,
-        isFlashcards: false
-      });
     }
 
     let dueDate = new Date(Date.now() + 7 * 86400000).toISOString();
