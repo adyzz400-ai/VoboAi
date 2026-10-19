@@ -29,13 +29,12 @@ export async function sparxLogin({ school, username, password, onStatus }) {
       if (url.endsWith('/token')) {
         try {
           let text = await response.text();
-          // The text is "bearer eyJ..."
           if (text.startsWith('bearer ')) {
             text = text.replace('bearer ', '').trim();
           }
           if (text.startsWith('eyJ')) {
             capturedJwt = text;
-            log('[sparx-login] Captured JWT from /token endpoint');
+            log('[sparx-login] Captured JWT');
           }
         } catch (e) {}
       }
@@ -45,24 +44,21 @@ export async function sparxLogin({ school, username, password, onStatus }) {
           const json = await response.json();
           if (json.sessionID) {
             capturedSessionId = json.sessionID;
-            log('[sparx-login] Captured Session ID: ' + capturedSessionId);
+            log('[sparx-login] Captured Session ID');
           }
         } catch (e) {}
       }
     });
 
-    step('navigating to school select');
+    step('navigating');
     await page.goto('https://selectschool.sparx-learning.com/?app=sparx_maths&forget=1', { waitUntil: 'networkidle2', timeout: 30000 });
 
-    step('searching for school: ' + school);
+    step('searching school');
     await page.waitForSelector('input[type="text"]', { timeout: 15000 });
-    await page.click endpoint('input[type="text"]');
-   .');
- await page.type('input[type="text"]',    school, { delay: 50 });
+    await page.click('input[type="text"]');
+    await page.type('input[type="text"]', school, { delay: 50 });
     
-    }
-
- await new Promise(r => setTimeout(r,    2000));
+    await new Promise(r => setTimeout(r, 2000));
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
     
@@ -72,7 +68,7 @@ export async function sparxLogin({ school, username, password, onStatus }) {
       if (btn) btn.click();
     });
 
-    step('waiting for login form');
+    step('waiting login form');
     await page.waitForSelector('input[name="username"]', { visible: true, timeout: 20000 });
     
     step('entering credentials');
@@ -87,11 +83,11 @@ export async function sparxLogin({ school, username, password, onStatus }) {
       else document.querySelector('input[type="submit"]')?.click();
     });
 
-    step('waiting for dashboard redirect');
+    step('waiting redirect');
     await page.waitForFunction(
       () => window.location.href.includes('/student'),
       { timeout: 25000 }
-    ).catch(() => log('[sparx-login] Redirect timeout, checking state...'));
+    ).catch(() => log('[sparx-login] Redirect timeout'));
     
     await new Promise(r => setTimeout(r, 5000));
 
@@ -100,7 +96,10 @@ export async function sparxLogin({ school, username, password, onStatus }) {
     const cookieString = cookies.map(c => c.name + '=' + c.value).join('; ');
     
     if (!capturedJwt) {
-      throw new Error('Login failed - could not intercept JWT from /token step('login successful');
+      throw new Error('Login failed - no JWT');
+    }
+
+    step('login successful');
     return { 
       jwt: capturedJwt, 
       sessionId: capturedSessionId || 'none', 
@@ -112,7 +111,7 @@ export async function sparxLogin({ school, username, password, onStatus }) {
   } finally {
     if (browser) {
       await browser.close().catch(() => {});
-      log('[sparx-login] Browser closed to free memory.');
+      log('[sparx-login] Browser closed');
     }
   }
 }
