@@ -10,13 +10,15 @@ import { renderMultiBar } from '../../utils/progressBar.js';
 export async function runSparxPackage({ session, packageId, homework, interaction, signal, onLog }) {
   const client = new SparxClient(session);
   
-  // Setup the progress bars for EVERY task in the homework
   const taskProgress = {};
   homework.tasks.forEach(t => {
     taskProgress[t.taskId] = { label: t.title, filled: 0, total: 10 };
   });
 
   let totalCorrect = 0;
+  let totalQuestions = homework.tasks.length * 10;
+  let questionsCompleted = 0;
+  const startTime = Date.now();
 
   for (let i = 0; i < homework.tasks.length; i++) {
     if (signal.cancelled) break;
@@ -24,39 +26,39 @@ export async function runSparxPackage({ session, packageId, homework, interactio
     
     onLog(`Starting ${task.title}...`);
 
-    // --- TIMES TABLES ---
     if (task.isTimesTables) {
-      const totalQuestions = 30;
+      const totalTTOuestions = 30;
       const answersToSubmit = [];
-      for (let q = 0; q < totalQuestions; q++) {
+      for (let q = 0; q < totalTTOuestions; q++) {
         if (signal.cancelled) break;
         const num1 = Math.floor(Math.random() * 12) + 1;
         const num2 = Math.floor(Math.random() * 12) + 1;
         answersToSubmit.push(String(num1 * num2));
         
         taskProgress[task.taskId].filled = q;
-        await updateUI(interaction, taskProgress, `**Times Tables**\n\nQuestion ${q + 1} of ${totalQuestions}\n\n${num1} × ${num2} = ?`);
+        questionsCompleted = (i * 10) + q; // Approximate
+        
+        await updateUI(interaction, taskProgress, homework, task.title, `${num1} × ${num2} = ?`, questionsCompleted, totalQuestions, totalCorrect, startTime);
         await sleep(1000);
       }
       if (!signal.cancelled) {
         try {
           await client.submitTimesTables(packageId, task.taskId, answersToSubmit);
-          taskProgress[task.taskId].filled = totalQuestions;
-          totalCorrect += totalQuestions;
+          taskProgress[task.taskId].filled = 10;
+          totalCorrect += totalTTOuestions;
         } catch (e) { onLog('Times Tables submit failed: ' + e.message); }
       }
       continue;
     }
 
-    // --- FLASHCARDS ---
     if (task.isFlashcards) {
       taskProgress[task.taskId].filled = 10;
-      await updateUI(interaction, taskProgress, `Finishing Flashcards...`);
+      questionsCompleted = (i + 1) * 10;
+      await updateUI(interaction, taskProgress, homework, task.title, 'Swiping flashcards...', questionsCompleted, totalQuestions, totalCorrect, startTime);
       await sleep(2000);
       continue;
     }
 
-    // --- STANDARD HOMEWORK TASK ---
     try {
       try {
         const bwBuffer = await client.getBookworkCheck(packageId, task.taskId);
@@ -67,13 +69,15 @@ export async function runSparxPackage({ session, packageId, homework, interactio
       let item = 1;
       let buffer = await client.getActivity(packageId, task.taskId, item);
       let taskCorrect = 0;
-      const totalQuestions = 10;
+      const tQuestions = 10;
 
-      while (item <= totalQuestions && !signal.cancelled) {
+      while (item <= tQuestions && !signal.cancelled) {
         let { prompt, choices, activityId } = parseSparxQuestion(buffer);
         
         taskProgress[task.taskId].filled = item - 1;
-        await updateUI(interaction, taskProgress, `**${task.title}**\n\nQuestion ${item}: ${prompt}`);
+        questionsCompleted = (i * 10) + (item - 1);
+        
+        await updateUI(interaction, taskProgress, homework, task.title, prompt, questionsCompleted, totalQuestions, totalCorrect, startTime);
         
         const cleanPrompt = prompt.replace(/\$/g, '');
         const cleanChoices = choices.map(c => c.text.replace(/\$/g, ''));
@@ -103,7 +107,6 @@ export async function runSparxPackage({ session, packageId, homework, interactio
 
         buffer = await client.submitAnswer(activityId, chosenRef, chosenText);
         
-        // Handle wrong answer (continue button)
         if (buffer.length > 5000) {
           onLog(`Wrong answer on ${task.title}. Continuing...`);
           const { activityId: continueActId } = parseSparxQuestion(buffer);
@@ -116,7 +119,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
         item++;
       }
 
-      taskProgress[task.taskId].filled = totalQuestions;
+      taskProgress[task.taskId].filled = 10;
       totalCorrect += taskCorrect;
       
     } catch (err) {
@@ -127,7 +130,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
   return { success: true, totalCorrect };
 }
 
-async function updateUI(interaction, progress, text) {
+async function updateUI(interaction, progress, homework, currentTaskName, questionText, qCompleted, qTotal, score, startTime) {
   const barBuf = renderMultiBar({ 
     bars: Object.values(progress),
     accent: '#0A78FF',
@@ -135,10 +138,24 @@ async function updateUI(interaction, progress, text) {
   });
   const file = new AttachmentBuilder(barBuf, { name: 'progress.png' });
 
+  // Format the SenAI layout text
+  const mins = Math.floor((Date.now() - startTime) / 60000);
+  const secs = Math.floor(((Date.now() - startTime) % 60000) / 1000);
+  const timeSpent = `${mins}m ${secs}s`;
+
   const embed = new EmbedBuilder()
     .setColor(0x0A78FF)
     .setAuthor({ name: 'Vobo AI · Sparx Maths' })
-    .setDescription(text)
+    .setTitle(`Homework due ${new Date(homework.dueDate).toLocaleDateString()}`)
+    .setDescription(
+      `**Name**: ${homework.title}\n` +
+      `**Status**: ${currentTaskName}\n` +
+      `**Question**: ${questionText.slice(0, 150)}\n\n` +
+      `📊 **Progress**\n` +
+      `**Questions Completed**: ${qCompleted}/${qTotal}\n` +
+      `**Time spent**: ${timeSpent}\n` +
+      `**Score so far**: ${score} correct`
+    )
     .setImage('attachment://progress.png');
 
   await interaction.editReply({ embeds: [embed], files: [file] }).catch(() => {});
