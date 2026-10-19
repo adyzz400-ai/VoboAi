@@ -21,7 +21,6 @@ export class SparxClient {
       'origin': 'https://maths.sparx-learning.com',
       'referer': 'https://maths.sparx-learning.com/',
       'cookie': this.session.cookie,
-      'authorization': 'bearer ' + this.session.jwt,
       'x-session-id': this.session.sessionId
     };
 
@@ -44,5 +43,70 @@ export class SparxClient {
     return this.request('/maths/sparx.packageactivity.v1.Packages/ListStudentPackages', payload.subarray(5));
   }
 
-  // ... (rest of the methods: getActivity, submitAnswer, continueActivity, getBookworkCheck, submitBookworkCheck, submitTimesTables)
+  async getActivity(packageId, taskId, itemNumber) {
+    const pathStr = 'packages/' + packageId + '/tasks/' + taskId + '/items/' + itemNumber;
+    const buffer = Buffer.concat([Buffer.from([0x12, pathStr.length]), Buffer.from(pathStr)]);
+    return this.request('/maths/sparx.packageactivity.v1.Activities/GetActivity', buffer);
+  }
+
+  async submitAnswer(activityId, choiceRef, answerText) {
+    const activityStr = '/activities/' + activityId;
+    const typeStr = choiceRef;
+    const ansStr = answerText;
+    
+    const buffer = Buffer.concat([
+      Buffer.from([0x0a]), Buffer.from([activityStr.length + 1]), Buffer.from(activityStr),
+      Buffer.from([0x12, ansStr.length + typeStr.length + 5]),
+      Buffer.from([0x0a]), Buffer.from([typeStr.length + 1]), Buffer.from([0x0a, typeStr.length]), Buffer.from(typeStr),
+      Buffer.from([0x12, ansStr.length + 1]), Buffer.from([0x0a, ansStr.length]), Buffer.from(ansStr)
+    ]);
+
+    return this.request('/maths/sparx.packageactivity.v1.Activities/ActivityAction', buffer);
+  }
+
+  async continueActivity(activityId) {
+    const activityStr = '/activities/' + activityId;
+    const buffer = Buffer.concat([
+      Buffer.from([0x0a]), Buffer.from([activityStr.length + 1]), Buffer.from(activityStr),
+      Buffer.from([0x1a, 0x00])
+    ]);
+    return this.request('/maths/sparx.packageactivity.v1.Activities/ActivityAction', buffer);
+  }
+
+  async getBookworkCheck(packageId, taskId) {
+    const pathStr = 'packages/' + packageId + '/tasks/' + taskId;
+    const buffer = Buffer.concat([Buffer.from([0x0a, pathStr.length]), Buffer.from(pathStr)]);
+    return this.request('/maths/sparx.packageactivity.v1.Activities/GetBookworkCheck', buffer);
+  }
+
+  async submitBookworkCheck(packageId, taskId, answer) {
+    const pathStr = 'packages/' + packageId + '/tasks/' + taskId;
+    const buffer = Buffer.concat([
+      Buffer.from([0x0a, pathStr.length]), Buffer.from(pathStr), Buffer.from([0x10, 0x02])
+    ]);
+    return this.request('/maths/sparx.packageactivity.v1.Activities/AnswerBookworkCheck', buffer);
+  }
+
+  async submitTimesTables(packageId, taskId, answers) {
+    const taskPath = 'packages/' + packageId + '/tasks/' + taskId;
+    const buffers = [];
+    
+    buffers.push(Buffer.from([0x0a, taskPath.length]));
+    buffers.push(Buffer.from(taskPath));
+    
+    for (const ans of answers) {
+      const ansStr = String(ans);
+      buffers.push(Buffer.from([0x12, ansStr.length]));
+      buffers.push(Buffer.from(ansStr));
+    }
+    
+    buffers.push(Buffer.from([0x1a, 0x06]));
+    buffers.push(Buffer.from('tables'));
+    
+    buffers.push(Buffer.from([0x22, 0x0b]));
+    buffers.push(Buffer.from('basicKeypad'));
+    
+    const payload = Buffer.concat(buffers);
+    return this.request('/maths/sparx.timestables.v1.TimesTables/SubmitTimesTablesAnswers', payload);
+  }
 }
