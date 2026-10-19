@@ -1,7 +1,14 @@
 // language: JavaScript (ESM), file: platforms/sparx/panel.js
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } from 'discord.js';
 import { getPlatform, getTheme } from '../../hub/sessionStore.js';
-import { relativeTag } from '../../utils/formatTime.js';
+import { relativeTag, dateOnlyToUnix } from '../../utils/formatTime.js';
+
+function formatDueDate(dateStr) {
+  if (!dateStr) return 'No date';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+}
 
 export async function buildPanel({ interaction }) {
   const userId = interaction.user.id;
@@ -36,9 +43,13 @@ export async function buildPanel({ interaction }) {
     for (let i = 0; i < session.tasks.length; i++) {
       const t = session.tasks[i];
       
+      // Format: Due Wednesday 4th Nov · 20% Accuracy
+      const due = formatDueDate(t.dueDate);
+      const acc = t.accuracy || '0%';
+      
       const opt = new StringSelectMenuOptionBuilder();
       opt.setLabel(t.title);
-      opt.setDescription(`Contains ${t.tasks.length} tasks`);
+      opt.setDescription(`Due ${due} · ${acc} Accuracy · ${t.tasks.length} tasks`);
       opt.setValue(String(t.packageId));
       
       if (String(t.packageId) === String(session.selectedTaskId || '')) {
