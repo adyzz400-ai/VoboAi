@@ -26,11 +26,35 @@ export async function runSparxPackage({ session, packageId, homework, interactio
     
     onLog(`Starting ${task.title}...`);
 
+    // --- TIMES TABLES ---
     if (task.isTimesTables) {
-      // Times Tables logic...
+      const totalTTOuestions = 30;
+      const answersToSubmit = [];
+      
+      for (let q = 0; q < totalTTOuestions; q++) {
+        if (signal.cancelled) break;
+        const num1 = Math.floor(Math.random() * 12) + 1;
+        const num2 = Math.floor(Math.random() * 12) + 1;
+        answersToSubmit.push(String(num1 * num2));
+        
+        taskProgress[task.taskId].filled = q;
+        questionsCompleted = (i * 10) + q;
+        
+        await updateUI(interaction, taskProgress, homework, task.title, `${num1} × ${num2} = ?`, questionsCompleted, totalQuestions, totalCorrect, startTime);
+        await sleep(1000);
+      }
+      
+      if (!signal.cancelled) {
+        try {
+          await client.submitTimesTables(packageId, task.taskId, answersToSubmit);
+          taskProgress[task.taskId].filled = 10;
+          totalCorrect += totalTTOuestions;
+        } catch (e) { onLog('Times Tables submit failed: ' + e.message); }
+      }
       continue;
     }
 
+    // --- FLASHCARDS ---
     if (task.isFlashcards) {
       taskProgress[task.taskId].filled = 10;
       questionsCompleted = (i + 1) * 10;
@@ -39,6 +63,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
       continue;
     }
 
+    // --- STANDARD HOMEWORK TASK ---
     try {
       try {
         const bwBuffer = await client.getBookworkCheck(packageId, task.taskId);
@@ -87,6 +112,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
 
         buffer = await client.submitAnswer(activityId, chosenRef, chosenText);
         
+        // Handle wrong answer (continue button)
         if (buffer.length > 5000) {
           onLog(`Wrong answer on ${task.title}. Continuing...`);
           const { activityId: continueActId } = parseSparxQuestion(buffer);
