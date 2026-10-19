@@ -62,8 +62,6 @@ export async function sparxLogin({ school, username, password, onStatus }) {
     await new Promise(r => setTimeout(r, 3000));
 
     step('manually fetching tokens via browser session');
-    
-    // Use the browser's cookies to fetch the token and session directly
     const authData = await page.evaluate(async () => {
       try {
         const tokenRes = await fetch('https://api.sparx-learning.com/token', { credentials: 'include' });
@@ -103,13 +101,13 @@ export async function sparxLogin({ school, username, password, onStatus }) {
       sessionId: authData.sessionId || 'none', 
       cookie: cookieString, 
       school, 
-      username 
+      username,
+      browser: browser,
+      page: page
     };
 
-  } finally {
-    if (browser) {
-      await browser.close().catch(() => {});
-      log('[sparx-login] Browser closed');
-    }
+  } catch (err) {
+    if (browser) await browser.close().catch(() => {});
+    throw err;
   }
 }
