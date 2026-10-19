@@ -13,7 +13,8 @@ export function parseSparxQuestion(buffer) {
   const actMatch = str.match(/\/activities\/([a-z0-9-]+)/);
   const activityId = actMatch ? actMatch[1] : null;
 
-  const layoutType = (data.layout && data.layout.type) ? data.layout.type : [];
+  const layoutType =
+    data.layout && data.layout.type ? data.layout.type : [];
   const isSlot =
     layoutType.includes('multi-part') ||
     layoutType.includes('interleaved-question-answer');
@@ -60,7 +61,6 @@ export function parseSparxQuestion(buffer) {
     };
   }
 
-  // standard multiple choice
   let prompt = '';
   let choices = [];
   try {
@@ -93,15 +93,19 @@ export function parseBookworkCode(buffer) {
 }
 
 export function parseHomeworkList(buffer) {
+  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) {
+    return [];
+  }
+
   const str = buffer.toString('utf8');
   const packages = [];
+  const uuidRe =
+    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
-  const blocks = str.split(/-packages\//);
-  if (blocks.length < 2) return packages;
+  const rawBlocks = str.split(/packages\//i);
+  const blocks = rawBlocks.length > 1 ? rawBlocks.slice(1) : [];
 
-  for (let i = 1; i < blocks.length; i++) {
-    const block = blocks[i];
-
+  for (const block of blocks) {
     const pkgMatch = block.match(
       /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
     );
@@ -114,45 +118,69 @@ export function parseHomeworkList(buffer) {
     );
     if (assignMatch) assignmentId = assignMatch[1];
 
-    let title = 'Homework';
-    if (block.includes('Homework')) title = 'Homework';
-
-    const tasks = [];
-    const taskRegex =
+    const taskIdSet = new Set();
+    const taskRe =
       /tasks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi;
-    const taskIds = [];
-    let m;
-    while ((m = taskRegex.exec(block)) !== null) {
-      taskIds.push({ id: m[1], index: m.index });
+    let tm;
+    while ((tm = taskRe.exec(block)) !== null) {
+      taskIdSet.add(tm[1].toLowerCase());
     }
 
-    for (let t = 0; t < taskIds.length; t++) {
-      const start = taskIds[t].index;
-      const end =
-        t + 1 < taskIds.length ? taskIds[t + 1].index : block.length;
-      const chunk = block.slice(start, end);
+    if (taskIdSet.size === 0) {
+      const loose = block.match(
+        /task[^0-9a-f]{0,20}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi
+      );
+      if (loose) {
+        for (const hit of loose) {
+          const id = hit.match(uuidRe);
+          if (id) taskIdSet.add(id[0].toLowerCase());
+        }
+      }
+    }
 
-      let taskTitle = 'Task';
+    const tasks = [];
+    let taskIndex = 1;
+    for (const tid of taskIdSet) {
+      const idx = block.toLowerCase().indexOf(tid);
+      const window =
+        idx >= 0 ? block.slice(Math.max(0, idx - 80), idx + 80) : '';
+
+      let title = 'Task ' + taskIndex;
       let isTimesTables = false;
       let isFlashcards = false;
 
-      if (/Times\s*Tables/i.test(chunk)) {
-        taskTitle = 'Times Tables';
+      if (
+        /times\s*tables/i.test(window) ||
+        /times\s*tables/i.test(block)
+      ) {
+        title = 'Times Tables';
         isTimesTables = true;
-      } else if (/Flashcards?/i.test(chunk)) {
-        taskTitle = 'Flashcards';
+      } else if (
+        /flash\s*cards?/i.test(window) ||
+        /flash\s*cards?/i.test(block)
+      ) {
+        title = 'Flashcards';
         isFlashcards = true;
       } else {
-        const nameMatch = chunk.match(/Task\s*(\d+)/i);
-        if (nameMatch) taskTitle = 'Task ' + nameMatch[1];
-        else if (/Homework/i.test(chunk)) taskTitle = 'Homework';
+        const num = window.match(/Task\s*(\d+)/i);
+        if (num) title = 'Task ' + num[1];
       }
 
       tasks.push({
-        taskId: taskIds[t].id,
-        title: taskTitle,
+        taskId: tid,
+        title: title,
         isTimesTables: isTimesTables,
         isFlashcards: isFlashcards
+      });
+      taskIndex++;
+    }
+
+    if (tasks.length === 0) {
+      tasks.push({
+        taskId: packageId,
+        title: 'Task 1',
+        isTimesTables: false,
+        isFlashcards: false
       });
     }
 
@@ -167,7 +195,7 @@ export function parseHomeworkList(buffer) {
     packages.push({
       packageId: assignmentId,
       rawPackageId: packageId,
-      title: title,
+      title: 'Homework',
       dueDate: dueDate,
       accuracy: '0%',
       tasks: tasks
