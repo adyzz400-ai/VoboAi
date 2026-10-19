@@ -20,10 +20,34 @@ export async function sparxLogin({ school, username, password, onStatus }) {
     page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
+    // Intercept BOTH /session and /token
     let capturedSessionId = null;
+    let capturedJwt = null;
 
     page.on('response', async (response) => {
       const url = response.url();
+      
+      // Catch the JWT from /token
+      if (url.endsWith('/token')) {
+        try {
+          const text = await response.text();
+          // The /token endpoint usually returns the raw JWT string, or a JSON object with the token.
+          if (text.startsWith('eyJ')) {
+            capturedJwt = text.trim();
+            log('[sparx-login] Captured JWT from /token endpoint');
+          } else {
+            const json = JSON.parse(text);
+            if (json.token) {
+              capturedJwt = json.token;
+              log('[sparx-login] Captured JWT from /token JSON response');
+            }
+          }
+        } catch (e) {
+          log('[sparx-login] Failed to parse /token response: ' + e.message);
+        }
+      }
+
+      // Catch the session ID from /session
       if (url.endsWith('/session')) {
         try {
           const json = await response.json();
@@ -74,20 +98,21 @@ export async function sparxLogin({ school, username, password, onStatus }) {
       { timeout: 25000 }
     ).catch(() => log('[sparx-login] Redirect timeout, checking state...'));
     
+    // Give the SPA time to make the API calls (/session, /token)
     await new Promise(r => setTimeout(r, 5000));
 
     step('capturing tokens');
     const cookies = await page.cookies();
     const cookieString = cookies.map(c => c.name + '=' + c.value).join('; ');
     
-    if (!capturedSessionId) {
-      throw new Error('Login failed - could not capture sessionID from network.');
+    if (!capturedJwt) {
+      throw new Error('Login failed - could not intercept JWT from /token endpoint.');
     }
 
     step('login successful');
     return { 
-      jwt: 'cookie-based-auth', 
-      sessionId: capturedSessionId, 
+      jwt: capturedJwt, 
+      sessionId: capturedSessionId || 'none', 
       cookie: cookieString, 
       school, 
       username 
