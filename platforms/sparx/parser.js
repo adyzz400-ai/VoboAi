@@ -38,14 +38,17 @@ export function parseHomeworkList(buffer) {
   if (!pkgMatch) return [];
   const packageId = pkgMatch[1];
 
+  // Find all tasks inside the binary blob
+  // The regex finds "tasks/uuid", then we look at the 50 chars after it for "Task 1", "Flashcards", etc.
   const taskRegex = /tasks\/([0-9a-f-]{36})/g;
   let match;
   const tasks = [];
 
-  // Parse every "tasks/{uuid}" exactly as it appears in the binary
   while ((match = taskRegex.exec(str)) !== null) {
     const taskId = match[1];
-    const chunk = str.slice(match.index, match.index + 500); 
+    
+    // Look ahead to find the task name
+    const chunk = str.slice(match.index, match.index + 150);
     
     let title = 'Task';
     let isTimesTables = false;
@@ -65,14 +68,21 @@ export function parseHomeworkList(buffer) {
     tasks.push({ taskId, title, isTimesTables, isFlashcards });
   }
 
-  // Deduplicate
+  // Deduplicate (the binary sometimes repeats the same task ID for internal references)
   const uniqueTasks = tasks.filter((v, i, a) => a.findIndex(t => t.taskId === v.taskId) === i);
+
+  // Try to find due date and accuracy in the JSON strings
+  let dueDate = new Date(Date.now() + 86400000 * 7).toISOString(); // Default 1 week
+  let accuracy = '0%';
+  
+  const dueMatch = str.match(/"dueDate":"(.*?)"/);
+  if (dueMatch) dueDate = dueMatch[1];
 
   return [{
     packageId,
-    title: 'Homework',
-    dueDate: new Date(Date.now() + 86400000).toISOString(), 
-    accuracy: '0%',
+    title: 'Homework due ' + new Date(dueDate).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }),
+    dueDate: dueDate,
+    accuracy: accuracy,
     tasks: uniqueTasks
   }];
 }
