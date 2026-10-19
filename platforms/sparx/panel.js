@@ -1,7 +1,7 @@
 // language: JavaScript (ESM), file: platforms/sparx/panel.js
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } from 'discord.js';
 import { getPlatform, getTheme } from '../../hub/sessionStore.js';
-import { relativeTag, dateOnlyToUnix } from '../../utils/formatTime.js';
+import { relativeTag } from '../../utils/formatTime.js';
 
 function formatDueDate(dateStr) {
   if (!dateStr) return 'No date';
@@ -43,7 +43,6 @@ export async function buildPanel({ interaction }) {
     for (let i = 0; i < session.tasks.length; i++) {
       const t = session.tasks[i];
       
-      // Format: Due Wednesday 4th Nov · 20% Accuracy
       const due = formatDueDate(t.dueDate);
       const acc = t.accuracy || '0%';
       
