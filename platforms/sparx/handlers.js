@@ -6,6 +6,7 @@ import { buildPanel } from './panel.js';
 import { buildSparxVariantEmbed, buildSparxVariantSelect } from './variantPicker.js';
 import { buildSparxLoginModal } from './loginModal.js';
 import { buildSparxTimingModal } from './timingModal.js';
+import { buildSparxSettingsModal } from './settingsModal.js';
 import { sparxLogin } from './login.js';
 import { runSparxTask } from './autocompleter.js';
 import { queue } from '../../queue/index.js';
@@ -76,7 +77,7 @@ export const sparxHandlers = {
           } catch (err) {
             warn('[sparx] task list failed: ' + err.message);
             patchPlatform(interaction.user.id, 'sparx', { 
-              tasks: [{ taskId: '6c046f6a-b85b-4631-87b6-c1b912a53f5b', packageId: '1beab238-c09e-49e9-8dbb-e489cce37f7f', title: 'Homework', questionCount: 10, correctCount: 0, status: 'new' }] 
+              tasks: [{ taskId: '1812bb54-8fde-4ecb-8c85-d03aa439a11b', packageId: 'd2fb57b3-80a3-482a-9a54-167b069764ae', title: 'Homework', questionCount: 10, correctCount: 0, status: 'new' }] 
             });
           }
 
@@ -104,6 +105,26 @@ export const sparxHandlers = {
       return interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed] });
     }
     patchPlatform(interaction.user.id, 'sparx', { waits: { min, max } });
+    await interaction.deferUpdate();
+    const panel = await buildPanel({ interaction: interaction });
+    await interaction.editReply({ embeds: [panel.embed], components: panel.components });
+  },
+
+  async 'sparx:settings'(interaction) {
+    return interaction.showModal(buildSparxSettingsModal(getPlatform(interaction.user.id, 'sparx')));
+  },
+
+  async 'sparx:settings:submit'(interaction) {
+    const min = Number(interaction.fields.getTextInputValue('min'));
+    const max = Number(interaction.fields.getTextInputValue('max'));
+    const model = interaction.fields.getTextInputValue('model')?.trim() || null;
+    
+    if (min < 1 || max < 1 || max > 200 || min > max) {
+      const embed = new EmbedBuilder().setColor(0xED4245).setDescription('Invalid wait window.');
+      return interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed] });
+    }
+    
+    patchPlatform(interaction.user.id, 'sparx', { waits: { min, max }, model: model });
     await interaction.deferUpdate();
     const panel = await buildPanel({ interaction: interaction });
     await interaction.editReply({ embeds: [panel.embed], components: panel.components });
