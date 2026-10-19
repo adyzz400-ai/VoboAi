@@ -53,17 +53,22 @@ export async function sparxLogin({ school, username, password, onStatus }) {
     await page.type(pSel, password, { delay: 50 });
 
     step('submitting login');
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => null),
-      page.evaluate(() => {
-        const btns = Array.from(document.querySelectorAll('button'));
-        const btn = btns.find(b => b.textContent.trim().toLowerCase() === 'log in');
-        if (btn) btn.click();
-        else document.querySelector('input[type="submit"]')?.click();
-      })
-    ]);
+    // Click login and wait for the URL to change
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('button'));
+      const btn = btns.find(b => b.textContent.trim().toLowerCase() === 'log in');
+      if (btn) btn.click();
+      else document.querySelector('input[type="submit"]')?.click();
+    });
 
-    // Wait a few seconds for SPA to load
+    step('waiting for dashboard redirect');
+    // Wait explicitly for the URL to contain 'student' or for a 20s timeout
+    await page.waitForFunction(
+      () => window.location.href.includes('/student') || window.location.href.includes('/my-educake'),
+      { timeout: 20000 }
+    ).catch(() => log('[sparx-login] URL redirect timeout, checking storage anyway.'));
+
+    // Wait a few more seconds for the SPA to populate local storage
     await new Promise(r => setTimeout(r, 3000));
 
     step('capturing tokens');
