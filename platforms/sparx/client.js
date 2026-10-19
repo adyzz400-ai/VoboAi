@@ -20,14 +20,10 @@ export class SparxClient {
       'x-grpc-web': '1',
       'origin': 'https://maths.sparx-learning.com',
       'referer': 'https://maths.sparx-learning.com/',
-      'cookie': this.session.cookie
+      'cookie': this.session.cookie,
+      'authorization': 'bearer ' + this.session.jwt,
+      'x-session-id': this.session.sessionId
     };
-
-    // Only send auth header if we have a real JWT
-    if (this.session.jwt !== 'cookie-only-session') {
-      headers['authorization'] = 'bearer ' + this.session.jwt;
-      headers['x-session-id'] = this.session.sessionId;
-    }
 
     const res = await fetch(this.baseUrl + path, {
       method: 'POST',
@@ -48,5 +44,5 @@ export class SparxClient {
     return this.request('/maths/sparx.packageactivity.v1.Packages/ListStudentPackages', payload.subarray(5));
   }
 
-  // ... (rest of methods: getActivity, submitAnswer, continueActivity, getBookworkCheck, submitBookworkCheck, submitTimesTables)
+  // ... (rest of the methods: getActivity, submitAnswer, continueActivity, getBookworkCheck, submitBookworkCheck, submitTimesTables)
 }
