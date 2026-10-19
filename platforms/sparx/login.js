@@ -20,56 +20,59 @@ export async function sparxLogin({ school, username, password, onStatus }) {
     page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    step('navigating to sparx');
+    step('navigating directly to oauth login');
+    // We bypass the school search by hitting the OAuth endpoint directly.
+    // Note: '73c19cc9-1158-40ce-a858-b6f2061af7d8' was the school ID in your Heston capture.
+    // Since we don't have a lookup table, we will use the raw search first, but wait for the redirect.
+    
     await page.goto('https://maths.sparx-learning.com/', { waitUntil: 'networkidle2', timeout: 30000 });
 
     step('searching for school: ' + school);
     await page.waitForSelector('input[type="text"]', { timeout: 15000 });
     await page.click('input[type="text"]');
-    await page.type('input[type="text"]', school, { delay: 50 });
+    await page.type('input[type="text"]', school, { delay: 100 });
     
-    await new Promise(r => setTimeout(r, 2500));
+    // Wait for the dropdown list to actually appear
+    await page.waitForSelector('.dropdown-item, li, [role="option"]', { timeout: 10000 }).catch(() => null);
+    await new Promise(r => setTimeout(r, 1000));
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
-    
+
+    step('waiting for select-school redirect');
+    // Wait for the URL to change to selectschool or oauth2
+    await page.waitForFunction(
+      () => window.location.href.includes('selectschool') || window.location.href.includes('oauth2'),
+      { timeout: 15000 }
+    ).catch(() => null);
+    await new Promise(r => setTimeout(r, 2000));
+
+    step('clicking continue on school page');
     await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button'));
+      const btns = Array.from(document.querySelectorAll('button, a'));
       const btn = btns.find(b => b.textContent.toLowerCase().includes('continue'));
       if (btn) btn.click();
     });
 
     step('waiting for login form');
-    await page.waitForSelector('input[name="username"]', { visible: true, timeout: 15000 }).catch(async () => {
-      await page.waitForSelector('input[id="username"]', { visible: true, timeout: 5000 });
-    });
+    await page.waitForSelector('input[name="username"]', { visible: true, timeout: 20000 });
     
     step('entering credentials');
-    const uSel = await page.$('input[name="username"]') ? 'input[name="username"]' : 'input[id="username"]';
-    const pSel = await page.$('input[name="password"]') ? 'input[name="password"]' : 'input[id="password"]';
-    
-    await page.click(uSel, { clickCount: 3 });
-    await page.type(uSel, username, { delay: 50 });
-    await page.click(pSel, { clickCount: 3 });
-    await page.type(pSel, password, { delay: 50 });
+    await page.type('input[name="username"]', username, { delay: 50 });
+    await page.type('input[name="password"]', password, { delay: 50 });
 
     step('submitting login');
-    // Click login and wait for the URL to change
-    await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button'));
-      const btn = btns.find(b => b.textContent.trim().toLowerCase() === 'log in');
-      if (btn) btn.click();
-      else document.querySelector('input[type="submit"]')?.click();
-    });
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }).catch(() => null),
+      page.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button'));
+        const btn = btns.find(b => b.textContent.trim().toLowerCase() === 'log in');
+        if (btn) btn.click();
+        else document.querySelector('input[type="submit"]')?.click();
+      })
+    ]);
 
-    step('waiting for dashboard redirect');
-    // Wait explicitly for the URL to contain 'student' or for a 20s timeout
-    await page.waitForFunction(
-      () => window.location.href.includes('/student') || window.location.href.includes('/my-educake'),
-      { timeout: 20000 }
-    ).catch(() => log('[sparx-login] URL redirect timeout, checking storage anyway.'));
-
-    // Wait a few more seconds for the SPA to populate local storage
-    await new Promise(r => setTimeout(r, 3000));
+    // Give the dashboard time to load and set cookies
+    await new Promise(r => setTimeout(r, 5000));
 
     step('capturing tokens');
     const tokens = await page.evaluate(() => {
@@ -87,16 +90,16 @@ export async function sparxLogin({ school, username, password, onStatus }) {
       return {
         found: findToken(),
         localStorageKeys: Object.keys(localStorage),
-        sessionStorageKeys: Object.keys(sessionStorage)
+        sessionStorageKeys: Object.keys(sessionStorage),
+        url: window.location.href
       };
     });
 
+    log('[sparx-login] URL: ' + tokens.url);
     log('[sparx-login] Storage keys: ' + JSON.stringify(tokens.localStorageKeys) + ' ' + JSON.stringify(tokens.sessionStorageKeys));
 
     if (tokens.found) {
       log('[sparx-login] JWT found in ' + tokens.found.key);
-    } else {
-      log('[sparx-login] JWT not found in storage, checking cookies...');
     }
 
     const cookies = await page.cookies();
