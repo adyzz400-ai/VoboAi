@@ -20,8 +20,33 @@ export async function sparxLogin({ school, username, password, onStatus }) {
     page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
+    // --- NETWORK INTERCEPTOR ---
+    let capturedJwt = null;
+    let capturedSessionId = null;
+
+    page.on('response', async (response) => {
+      const url = response.url();
+      if (url.includes('/session') || url.includes('/token')) {
+        try {
+          const text = await response.text();
+          // Sometimes it's a raw JWT string, sometimes it's JSON
+          if (text.startsWith('eyJ')) {
+            capturedJwt = text.trim();
+          } else {
+            const json = JSON.parse(text);
+            if (json.accessToken) capturedJwt = json.accessToken;
+            if (json.token) capturedJwt = json.token;
+            if (json.session_id) capturedSessionId = json.session_id;
+            if (json.sessionId) capturedSessionId = json.sessionId;
+          }
+          if (capturedJwt) {
+            log('[sparx-login] Intercepted JWT from network response: ' + url);
+          }
+        } catch (e) {}
+      }
+    });
+
     step('navigating to school select');
-    // Direct navigation to the school selector
     await page.goto('https://selectschool.sparx-learning.com/?app=sparx_maths&forget=1', { waitUntil: 'networkidle2', timeout: 30000 });
 
     step('searching for school: ' + school);
@@ -29,12 +54,10 @@ export async function sparxLogin({ school, username, password, onStatus }) {
     await page.click('input[type="text"]');
     await page.type('input[type="text"]', school, { delay: 50 });
     
-    // Wait for the dropdown to populate and hit Enter
     await new Promise(r => setTimeout(r, 2000));
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
     
-    // Click Continue
     await page.evaluate(() => {
       const btns = Array.from(document.querySelectorAll('button'));
       const btn = btns.find(b => b.textContent.toLowerCase().includes('continue'));
@@ -56,72 +79,27 @@ export async function sparxLogin({ school, username, password, onStatus }) {
       else document.querySelector('input[type="submit"]')?.click();
     });
 
-    // Wait for the dashboard URL
     step('waiting for dashboard redirect');
     await page.waitForFunction(
       () => window.location.href.includes('/student'),
       { timeout: 25000 }
     ).catch(() => log('[sparx-login] Redirect timeout, checking state...'));
     
-    // Give the SPA time to set cookies and storage
+    // Give the SPA time to make the API calls
     await new Promise(r => setTimeout(r, 5000));
 
     step('capturing tokens');
-    const tokens = await page.evaluate(() => {
-      const findToken = () => {
-        const isJwt = v => typeof v === 'string' && /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(v);
-        for (const store of [localStorage, sessionStorage]) {
-          for (let i = 0; i < store.length; i++) {
-            const k = store.key(i);
-            const v = store.getItem(k);
-            if (isJwt(v)) return v;
-            try {
-              const parsed = JSON.parse(v);
-              const walk = (o) => {
-                if (!o || typeof o !== 'object') return null;
-                for (const val of Object.values(o)) {
-                  if (isJwt(val)) return val;
-                  const deep = walk(val);
-                  if (deep) return deep;
-                }
-                return null;
-              };
-              const deep = walk(parsed);
-              if (deep) return deep;
-            } catch (e) {}
-          }
-        }
-        return null;
-      };
-      return {
-        jwt: findToken(),
-        url: window.location.href,
-        localStorageKeys: Object.keys(localStorage),
-        sessionStorageKeys: Object.keys(sessionStorage)
-      };
-    });
-
-    log('[sparx-login] URL: ' + tokens.url);
-    log('[sparx-login] Storage keys: ' + JSON.stringify(tokens.localStorageKeys) + ' ' + JSON.stringify(tokens.sessionStorageKeys));
-
     const cookies = await page.cookies();
     const cookieString = cookies.map(c => c.name + '=' + c.value).join('; ');
-    const sessionCookie = cookies.find(c => c.name === 'spxlrn_session');
 
-    if (!tokens.jwt && !sessionCookie) {
-      throw new Error('Login failed - no JWT or session cookie found.');
-    }
-
-    if (tokens.jwt) {
-      log('[sparx-login] JWT extracted from storage.');
-    } else {
-      log('[sparx-login] Using session cookie for auth.');
+    if (!capturedJwt) {
+      throw new Error('Login failed - could not intercept JWT from network traffic.');
     }
 
     step('login successful');
     return { 
-      jwt: tokens.jwt || 'cookie-only-session', 
-      sessionId: 'cookie-only-session', 
+      jwt: capturedJwt, 
+      sessionId: capturedSessionId || 'none', 
       cookie: cookieString, 
       school, 
       username 
