@@ -10,6 +10,7 @@ import { renderMultiBar } from '../../utils/progressBar.js';
 export async function runSparxPackage({ session, packageId, homework, interaction, signal, onLog }) {
   const client = new SparxClient(session);
   
+  // Setup the progress bars for EVERY task in the homework
   const taskProgress = {};
   homework.tasks.forEach(t => {
     taskProgress[t.taskId] = { label: t.title, filled: 0, total: 10 };
@@ -23,6 +24,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
     
     onLog(`Starting ${task.title}...`);
 
+    // --- TIMES TABLES ---
     if (task.isTimesTables) {
       const totalQuestions = 30;
       const answersToSubmit = [];
@@ -31,6 +33,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
         const num1 = Math.floor(Math.random() * 12) + 1;
         const num2 = Math.floor(Math.random() * 12) + 1;
         answersToSubmit.push(String(num1 * num2));
+        
         taskProgress[task.taskId].filled = q;
         await updateUI(interaction, taskProgress, `**Times Tables**\n\nQuestion ${q + 1} of ${totalQuestions}\n\n${num1} × ${num2} = ?`);
         await sleep(1000);
@@ -45,6 +48,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
       continue;
     }
 
+    // --- FLASHCARDS ---
     if (task.isFlashcards) {
       taskProgress[task.taskId].filled = 10;
       await updateUI(interaction, taskProgress, `Finishing Flashcards...`);
@@ -52,6 +56,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
       continue;
     }
 
+    // --- STANDARD HOMEWORK TASK ---
     try {
       try {
         const bwBuffer = await client.getBookworkCheck(packageId, task.taskId);
@@ -98,6 +103,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
 
         buffer = await client.submitAnswer(activityId, chosenRef, chosenText);
         
+        // Handle wrong answer (continue button)
         if (buffer.length > 5000) {
           onLog(`Wrong answer on ${task.title}. Continuing...`);
           const { activityId: continueActId } = parseSparxQuestion(buffer);
