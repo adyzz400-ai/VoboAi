@@ -23,7 +23,6 @@ export async function sparxLogin({ school, username, password, onStatus }) {
     step('navigating to sparx');
     await page.goto('https://maths.sparx-learning.com/', { waitUntil: 'networkidle2', timeout: 30000 });
 
-    // 1. SELECT SCHOOL
     step('searching for school: ' + school);
     await page.waitForSelector('input[type="text"]', { timeout: 10000 });
     await page.click('input[type="text"]');
@@ -39,7 +38,6 @@ export async function sparxLogin({ school, username, password, onStatus }) {
       if (btn) btn.click();
     });
 
-    // 2. LOGIN
     step('waiting for login form');
     await page.waitForSelector('input[name="username"]', { visible: true, timeout: 15000 }).catch(async () => {
       await page.waitForSelector('input[id="username"]', { visible: true, timeout: 5000 });
