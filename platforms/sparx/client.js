@@ -14,35 +14,56 @@ export class SparxClient {
     frame.writeUInt32BE(length, 1);
     payloadBuffer.copy(frame, 5);
 
-    // The token must be sent as "bearer <jwt>"
     const authHeader = this.session.jwt.startsWith('bearer ') 
       ? this.session.jwt 
       : 'bearer ' + this.session.jwt;
 
-    const headers = {
-      'accept': '*/*',
-      'authorization': authHeader,
-      'x-session-id': this.session.sessionId,
-      'content-type': 'application/grpc-web+proto',
-      'x-grpc-web': '1',
-      'origin': 'https://maths.sparx-learning.com',
-      'referer': 'https://maths.sparx-learning.com/',
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    };
+    log('[sparx] POST ' + path);
 
-    log('[sparx] POST ' + path + ' | Auth: ' + authHeader.slice(0, 20) + '... | Session: ' + this.session.sessionId);
-
-    const res = await fetch(this.baseUrl + path, {
-      method: 'POST',
-      headers: headers,
-      body: frame
+    // Send fetch through Puppeteer to use the browser's cookies and TLS fingerprint
+    const result = await this.session.page.evaluate(async (args) => {
+      try {
+        const res = await fetch(args.url, {
+          method: 'POST',
+          headers: {
+            'accept': '*/*',
+            'authorization': args.authHeader,
+            'x-session-id': args.sessionId,
+            'content-type': 'application/grpc-web+proto',
+            'x-grpc-web': '1',
+            'origin': 'https://maths.sparx-learning.com',
+            'referer': 'https://maths.sparx-learning.com/',
+          },
+          body: new Uint8Array(args.frame)
+        });
+        
+        if (!res.ok) {
+          return { error: res.status, text: await res.text() };
+        }
+        
+        const arrayBuffer = await res.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        return { ok: true, data: btoa(binary) };
+      } catch (e) {
+        return { error: 0, text: e.message };
+      }
+    }, {
+      url: this.baseUrl + path,
+      authHeader: authHeader,
+      sessionId: this.session.sessionId,
+      frame: Array.from(frame)
     });
 
-    if (!res.ok) {
-      log('[sparx] API error ' + res.status + ' on ' + path);
-      throw new Error('Sparx API error: ' + res.status);
+    if (result.error) {
+      log('[sparx] API error ' + result.error + ' on ' + path);
+      throw new Error('Sparx API error: ' + result.error);
     }
-    return Buffer.from(await res.arrayBuffer());
+
+    return Buffer.from(result.data, 'base64');
   }
 
   async getHomeworkList() {
