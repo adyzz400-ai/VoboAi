@@ -98,7 +98,6 @@ export async function runSparxPackage({ session, packageId, homework, interactio
 
         buffer = await client.submitAnswer(activityId, chosenRef, chosenText);
         
-        // Handle wrong answer (continue button)
         if (buffer.length > 5000) {
           onLog(`Wrong answer on ${task.title}. Continuing...`);
           const { activityId: continueActId } = parseSparxQuestion(buffer);
