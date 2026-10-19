@@ -20,36 +20,6 @@ export async function sparxLogin({ school, username, password, onStatus }) {
     page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    let capturedSessionId = null;
-    let capturedJwt = null;
-
-    page.on('response', async (response) => {
-      const url = response.url();
-      
-      if (url.endsWith('/token')) {
-        try {
-          let text = await response.text();
-          if (text.startsWith('bearer ')) {
-            text = text.replace('bearer ', '').trim();
-          }
-          if (text.startsWith('eyJ')) {
-            capturedJwt = text;
-            log('[sparx-login] Captured JWT');
-          }
-        } catch (e) {}
-      }
-
-      if (url.endsWith('/session')) {
-        try {
-          const json = await response.json();
-          if (json.sessionID) {
-            capturedSessionId = json.sessionID;
-            log('[sparx-login] Captured Session ID');
-          }
-        } catch (e) {}
-      }
-    });
-
     step('navigating');
     await page.goto('https://selectschool.sparx-learning.com/?app=sparx_maths&forget=1', { waitUntil: 'networkidle2', timeout: 30000 });
 
@@ -89,20 +59,48 @@ export async function sparxLogin({ school, username, password, onStatus }) {
       { timeout: 25000 }
     ).catch(() => log('[sparx-login] Redirect timeout'));
     
-    await new Promise(r => setTimeout(r, 5000));
+    await new Promise(r => setTimeout(r, 3000));
 
-    step('capturing tokens');
+    step('manually fetching tokens via browser session');
+    
+    // Use the browser's cookies to fetch the token and session directly
+    const authData = await page.evaluate(async () => {
+      try {
+        const tokenRes = await fetch('https://api.sparx-learning.com/token', { credentials: 'include' });
+        const tokenText = await tokenRes.text();
+        
+        const sessionRes = await fetch('https://api.sparx-learning.com/session', { credentials: 'include' });
+        const sessionJson = await sessionRes.json();
+
+        return {
+          tokenText,
+          sessionId: sessionJson.sessionID || null
+        };
+      } catch (e) {
+        return { error: e.message };
+      }
+    });
+
+    if (authData.error) {
+      throw new Error('Failed to fetch tokens: ' + authData.error);
+    }
+
+    let jwt = authData.tokenText;
+    if (jwt.startsWith('bearer ')) jwt = jwt.replace('bearer ', '').trim();
+
+    if (!jwt || !jwt.startsWith('eyJ')) {
+      throw new Error('Login failed - Token endpoint returned invalid data: ' + jwt.slice(0, 20));
+    }
+
+    log('[sparx-login] Successfully fetched JWT and Session ID');
+
     const cookies = await page.cookies();
     const cookieString = cookies.map(c => c.name + '=' + c.value).join('; ');
-    
-    if (!capturedJwt) {
-      throw new Error('Login failed - no JWT');
-    }
 
     step('login successful');
     return { 
-      jwt: capturedJwt, 
-      sessionId: capturedSessionId || 'none', 
+      jwt: jwt, 
+      sessionId: authData.sessionId || 'none', 
       cookie: cookieString, 
       school, 
       username 
