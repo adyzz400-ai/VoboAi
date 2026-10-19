@@ -30,20 +30,16 @@ export async function runSparxPackage({ session, packageId, homework, interactio
     if (task.isTimesTables) {
       const totalTTOuestions = 30;
       const answersToSubmit = [];
-      
       for (let q = 0; q < totalTTOuestions; q++) {
         if (signal.cancelled) break;
         const num1 = Math.floor(Math.random() * 12) + 1;
         const num2 = Math.floor(Math.random() * 12) + 1;
         answersToSubmit.push(String(num1 * num2));
-        
         taskProgress[task.taskId].filled = q;
         questionsCompleted = (i * 10) + q;
-        
         await updateUI(interaction, taskProgress, homework, task.title, `${num1} × ${num2} = ?`, questionsCompleted, totalQuestions, totalCorrect, startTime);
         await sleep(1000);
       }
-      
       if (!signal.cancelled) {
         try {
           await client.submitTimesTables(packageId, task.taskId, answersToSubmit);
@@ -54,16 +50,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
       continue;
     }
 
-    // --- FLASHCARDS ---
-    if (task.isFlashcards) {
-      taskProgress[task.taskId].filled = 10;
-      questionsCompleted = (i + 1) * 10;
-      await updateUI(interaction, taskProgress, homework, task.title, 'Swiping flashcards...', questionsCompleted, totalQuestions, totalCorrect, startTime);
-      await sleep(2000);
-      continue;
-    }
-
-    // --- STANDARD HOMEWORK TASK ---
+    // --- STANDARD HOMEWORK & FLASHCARDS ---
     try {
       try {
         const bwBuffer = await client.getBookworkCheck(packageId, task.taskId);
@@ -77,7 +64,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
       const tQuestions = 10;
 
       while (item <= tQuestions && !signal.cancelled) {
-        let { prompt, choices, activityId } = parseSparxQuestion(buffer);
+        let { prompt, choices, activityId, type } = parseSparxQuestion(buffer);
         
         taskProgress[task.taskId].filled = item - 1;
         questionsCompleted = (i * 10) + (item - 1);
