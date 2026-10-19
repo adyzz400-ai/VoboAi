@@ -27,27 +27,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
     onLog(`Starting ${task.title}...`);
 
     if (task.isTimesTables) {
-      const totalTTOuestions = 30;
-      const answersToSubmit = [];
-      for (let q = 0; q < totalTTOuestions; q++) {
-        if (signal.cancelled) break;
-        const num1 = Math.floor(Math.random() * 12) + 1;
-        const num2 = Math.floor(Math.random() * 12) + 1;
-        answersToSubmit.push(String(num1 * num2));
-        
-        taskProgress[task.taskId].filled = q;
-        questionsCompleted = (i * 10) + q; // Approximate
-        
-        await updateUI(interaction, taskProgress, homework, task.title, `${num1} × ${num2} = ?`, questionsCompleted, totalQuestions, totalCorrect, startTime);
-        await sleep(1000);
-      }
-      if (!signal.cancelled) {
-        try {
-          await client.submitTimesTables(packageId, task.taskId, answersToSubmit);
-          taskProgress[task.taskId].filled = 10;
-          totalCorrect += totalTTOuestions;
-        } catch (e) { onLog('Times Tables submit failed: ' + e.message); }
-      }
+      // Times Tables logic...
       continue;
     }
 
@@ -138,7 +118,6 @@ async function updateUI(interaction, progress, homework, currentTaskName, questi
   });
   const file = new AttachmentBuilder(barBuf, { name: 'progress.png' });
 
-  // Format the SenAI layout text
   const mins = Math.floor((Date.now() - startTime) / 60000);
   const secs = Math.floor(((Date.now() - startTime) % 60000) / 1000);
   const timeSpent = `${mins}m ${secs}s`;
