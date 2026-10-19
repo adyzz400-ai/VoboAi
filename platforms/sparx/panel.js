@@ -3,13 +3,6 @@ import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelec
 import { getPlatform, getTheme } from '../../hub/sessionStore.js';
 import { relativeTag } from '../../utils/formatTime.js';
 
-function formatDueDate(dateStr) {
-  if (!dateStr) return '';
-  const d = new Date(dateStr + 'T12:00:00Z');
-  if (isNaN(d.getTime())) return dateStr;
-  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-}
-
 export async function buildPanel({ interaction }) {
   const userId = interaction.user.id;
   const session = getPlatform(userId, 'sparx');
@@ -26,49 +19,37 @@ export async function buildPanel({ interaction }) {
   if (loggedIn && session?.jwtExpUnix) statusExtra = 'Session expires: ' + relativeTag(session.jwtExpUnix);
 
   let taskLine = 'Log in to see tasks.';
-  if (loggedIn) taskLine = hasTasks ? 'Pick an outstanding task to run:' : 'No outstanding tasks found.';
-
-  let waits = { min: 8, max: 15 };
-  if (session && session.waits) waits = session.waits;
-  const waitValue = 'Min: ' + waits.min + 's    Max: ' + waits.max + 's';
+  if (loggedIn) taskLine = hasTasks ? 'Pick a homework to run:' : 'No outstanding homework found.';
 
   const embed = new EmbedBuilder();
   embed.setColor(accent);
   embed.setAuthor({ name: 'Vobo AI · Sparx Maths' });
   embed.addFields(
     { name: 'Status', value: statusLine + '\n' + statusExtra },
-    { name: 'Homework', value: taskLine },
-    { name: 'Wait per question', value: waitValue }
+    { name: 'Homework', value: taskLine }
   );
 
   const components = [];
 
   if (loggedIn && hasTasks) {
-    const outstanding = session.tasks.filter(t => t.status !== 'completed').slice(0, 25);
-    if (outstanding.length > 0) {
-      const options = [];
-      for (let i = 0; i < outstanding.length; i++) {
-        const t = outstanding[i];
-        const due = t.dueDate ? ' · due ' + formatDueDate(t.dueDate) : '';
-        const total = t.questionCount || 1;
-        const correct = t.correctCount || 0;
-        const acc = Math.round((correct / total) * 100);
-        
-        const title = String(t.title).slice(0, 100);
-        const desc = (t.subject || 'Maths') + ' · ' + t.questionCount + ' Qs · ' + acc + '% Accuracy' + due;
-        
-        const opt = new StringSelectMenuOptionBuilder();
-        opt.setLabel(title);
-        opt.setDescription(desc.slice(0, 100));
-        opt.setValue(String(t.taskId));
-        if (String(t.taskId) === String(session.selectedTaskId || '')) opt.setDefault(true);
-        options.push(opt);
+    const options = [];
+    for (let i = 0; i < session.tasks.length; i++) {
+      const t = session.tasks[i];
+      
+      const opt = new StringSelectMenuOptionBuilder();
+      opt.setLabel(t.title);
+      opt.setDescription(`Contains ${t.tasks.length} tasks`);
+      opt.setValue(String(t.packageId));
+      
+      if (String(t.packageId) === String(session.selectedTaskId || '')) {
+        opt.setDefault(true);
       }
-
-      const menu = new StringSelectMenuBuilder().setCustomId('sparx:task').setPlaceholder('Select a task…').addOptions(options);
-      const row = new ActionRowBuilder().addComponents(menu);
-      components.push(row);
+      options.push(opt);
     }
+
+    const menu = new StringSelectMenuBuilder().setCustomId('sparx:task').setPlaceholder('Select homework…').addOptions(options);
+    const row = new ActionRowBuilder().addComponents(menu);
+    components.push(row);
   }
 
   const EMOJI_START = { id: '1561456743853326417', name: 'start' };
