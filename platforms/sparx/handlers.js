@@ -60,9 +60,11 @@ export const sparxHandlers = {
       run: async function () {
         try {
           const session = await sparxLogin({ school, username, password, onStatus: status });
+          
           setPlatform(interaction.user.id, 'sparx', {
             username: username, password: password, school: school,
             jwt: session.jwt, sessionId: session.sessionId, cookie: session.cookie,
+            browser: session.browser, page: session.page, // Save the browser context
             jwtExpUnix: Math.floor(Date.now() / 1000) + 3600,
             waits: { min: config.waits.min, max: config.waits.max },
             selectedTaskId: null, tasks: null, startedAt: Date.now()
