@@ -32,18 +32,17 @@ export function parseBookworkCode(buffer) {
 
 export function parseHomeworkList(buffer) {
   const str = buffer.toString('utf8');
-  const packages = [];
   
   // Find the main package ID
   const pkgMatch = str.match(/packages\/([0-9a-f-]{36})/);
   if (!pkgMatch) return [];
   const packageId = pkgMatch[1];
 
-  // Find all task IDs
   const taskRegex = /tasks\/([0-9a-f-]{36})/g;
   let match;
   const tasks = [];
 
+  // Parse every "tasks/{uuid}" exactly as it appears in the binary
   while ((match = taskRegex.exec(str)) !== null) {
     const taskId = match[1];
     const chunk = str.slice(match.index, match.index + 500); 
@@ -66,21 +65,13 @@ export function parseHomeworkList(buffer) {
     tasks.push({ taskId, title, isTimesTables, isFlashcards });
   }
 
+  // Deduplicate
   const uniqueTasks = tasks.filter((v, i, a) => a.findIndex(t => t.taskId === v.taskId) === i);
 
-  // If we can't find any tasks, default to the package ID so it doesn't break.
-  if (uniqueTasks.length === 0) {
-    uniqueTasks.push({ taskId: packageId, title: 'Task 1', isTimesTables: false, isFlashcards: false });
-  }
-
-  // --- Extract Accuracy & Due Date ---
-  // Sparx binary doesn't easily expose these strings, so we set fallbacks 
-  // (Due: Tomorrow, Accuracy: 0%) for now, but the UI will render them.
-  
   return [{
     packageId,
     title: 'Homework',
-    dueDate: new Date(Date.now() + 86400000).toISOString(), // Placeholder for tomorrow
+    dueDate: new Date(Date.now() + 86400000).toISOString(), 
     accuracy: '0%',
     tasks: uniqueTasks
   }];
