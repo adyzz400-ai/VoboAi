@@ -22,6 +22,9 @@ export class SparxClient {
 
     // Send fetch through Puppeteer to use the browser's cookies and TLS fingerprint
     const result = await this.session.page.evaluate(async (args) => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+
       try {
         const res = await fetch(args.url, {
           method: 'POST',
@@ -34,7 +37,8 @@ export class SparxClient {
             'origin': 'https://maths.sparx-learning.com',
             'referer': 'https://maths.sparx-learning.com/',
           },
-          body: new Uint8Array(args.frame)
+          body: new Uint8Array(args.frame),
+          signal: controller.signal
         });
         
         if (!res.ok) {
@@ -50,6 +54,8 @@ export class SparxClient {
         return { ok: true, data: btoa(binary) };
       } catch (e) {
         return { error: 0, text: e.message };
+      } finally {
+        clearTimeout(timeout);
       }
     }, {
       url: this.baseUrl + path,
@@ -59,7 +65,7 @@ export class SparxClient {
     });
 
     if (result.error) {
-      log('[sparx] API error ' + result.error + ' on ' + path);
+      log('[sparx] API error ' + result.error + ' on ' + path + ' — ' + result.text);
       throw new Error('Sparx API error: ' + result.error);
     }
 
