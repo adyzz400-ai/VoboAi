@@ -20,34 +20,26 @@ export async function sparxLogin({ school, username, password, onStatus }) {
     page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    // Intercept BOTH /session and /token
     let capturedSessionId = null;
     let capturedJwt = null;
 
     page.on('response', async (response) => {
       const url = response.url();
       
-      // Catch the JWT from /token
       if (url.endsWith('/token')) {
         try {
-          const text = await response.text();
-          // The /token endpoint usually returns the raw JWT string, or a JSON object with the token.
-          if (text.startsWith('eyJ')) {
-            capturedJwt = text.trim();
-            log('[sparx-login] Captured JWT from /token endpoint');
-          } else {
-            const json = JSON.parse(text);
-            if (json.token) {
-              capturedJwt = json.token;
-              log('[sparx-login] Captured JWT from /token JSON response');
-            }
+          let text = await response.text();
+          // The text is "bearer eyJ..."
+          if (text.startsWith('bearer ')) {
+            text = text.replace('bearer ', '').trim();
           }
-        } catch (e) {
-          log('[sparx-login] Failed to parse /token response: ' + e.message);
-        }
+          if (text.startsWith('eyJ')) {
+            capturedJwt = text;
+            log('[sparx-login] Captured JWT from /token endpoint');
+          }
+        } catch (e) {}
       }
 
-      // Catch the session ID from /session
       if (url.endsWith('/session')) {
         try {
           const json = await response.json();
@@ -64,10 +56,13 @@ export async function sparxLogin({ school, username, password, onStatus }) {
 
     step('searching for school: ' + school);
     await page.waitForSelector('input[type="text"]', { timeout: 15000 });
-    await page.click('input[type="text"]');
-    await page.type('input[type="text"]', school, { delay: 50 });
+    await page.click endpoint('input[type="text"]');
+   .');
+ await page.type('input[type="text"]',    school, { delay: 50 });
     
-    await new Promise(r => setTimeout(r, 2000));
+    }
+
+ await new Promise(r => setTimeout(r,    2000));
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
     
@@ -98,7 +93,6 @@ export async function sparxLogin({ school, username, password, onStatus }) {
       { timeout: 25000 }
     ).catch(() => log('[sparx-login] Redirect timeout, checking state...'));
     
-    // Give the SPA time to make the API calls (/session, /token)
     await new Promise(r => setTimeout(r, 5000));
 
     step('capturing tokens');
@@ -106,10 +100,7 @@ export async function sparxLogin({ school, username, password, onStatus }) {
     const cookieString = cookies.map(c => c.name + '=' + c.value).join('; ');
     
     if (!capturedJwt) {
-      throw new Error('Login failed - could not intercept JWT from /token endpoint.');
-    }
-
-    step('login successful');
+      throw new Error('Login failed - could not intercept JWT from /token step('login successful');
     return { 
       jwt: capturedJwt, 
       sessionId: capturedSessionId || 'none', 
