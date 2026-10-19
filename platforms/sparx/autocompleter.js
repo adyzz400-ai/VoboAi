@@ -7,77 +7,134 @@ import { parseSparxQuestion, parseBookworkCode } from './parser.js';
 import { SparxClient } from './client.js';
 import { renderMultiBar } from '../../utils/progressBar.js';
 
-export async function runSparxTask({ session, packageId, taskId, taskName, interaction, signal, onLog }) {
+export async function runSparxPackage({ session, packageId, homework, interaction, signal, onLog }) {
   const client = new SparxClient(session);
   
-  onLog('Checking for Bookwork...');
-  try {
-    const bwBuffer = await client.getBookworkCheck(packageId, taskId);
-    const bwCode = parseBookworkCode(bwBuffer);
-    if (bwCode) {
-      onLog('Submitting Bookwork code: ' + bwCode);
-      await client.submitBookworkCheck(packageId, taskId, bwCode);
-    }
-  } catch (err) {
-    onLog('Bookwork check skipped.');
-  }
+  const taskProgress = {};
+  homework.tasks.forEach(t => {
+    taskProgress[t.taskId] = { label: t.title, filled: 0, total: 10 };
+  });
 
-  let item = 1;
-  let buffer = await client.getActivity(packageId, taskId, item);
-  const totalQuestions = 10;
-  let correct = 0;
-  
-  while (item <= totalQuestions && !signal.cancelled) {
-    const { prompt, choices, activityId } = parseSparxQuestion(buffer);
-    
-    const barBuf = renderMultiBar({ 
-      bars: [{ label: 'Task: ' + taskName, filled: correct, total: totalQuestions }],
-      accent: '#0A78FF',
-    });
-    const file = new AttachmentBuilder(barBuf, { name: 'progress.png' });
-    
-    const embed = new EmbedBuilder()
-      .setColor(0x0A78FF)
-      .setAuthor({ name: 'Vobo AI · Sparx Maths' })
-      .setTitle('Running Task: ' + taskName)
-      .setDescription(`**Question ${item} of ${totalQuestions}**\n\n**${prompt}**`)
-      .addFields({ name: 'Score so far', value: `✓ ${correct} correct` })
-      .setImage('attachment://progress.png');
+  let totalCorrect = 0;
 
-    await interaction.editReply({ embeds: [embed], files: [file] }).catch(() => {});
-    
-    const normQ = { kind: 'multiple_choice', prompt, choices: choices.map(c => c.text), image: null, unit: null };
-    const geminiResp = await getAIanswer(normQ, session);
-    
-    let chosenRef = null;
-    const exact = choices.find(c => c.text === geminiResp.answer);
-    if (exact) chosenRef = exact.ref;
-    else {
-      const clean = geminiResp.answer.replace(/\s+/g, '').toLowerCase();
-      const close = choices.find(c => c.text.replace(/\s+/g, '').toLowerCase() === clean);
-      if (close) chosenRef = close.ref;
-    }
-    if (!chosenRef) chosenRef = choices[0].ref;
-    
-    const chosenText = choices.find(c => c.ref === chosenRef).text;
-    
-    const minMs = (session.waits?.min || 8) * 1000;
-    const maxMs = (session.waits?.max || 15) * 1000;
-    const waitMs = minMs + Math.floor(Math.random() * (maxMs - minMs));
-    
-    let waited = 0;
-    while (waited < waitMs) {
-      if (signal.cancelled) break;
-      await sleep(500);
-      waited += 500;
-    }
-    
+  for (let i = 0; i < homework.tasks.length; i++) {
     if (signal.cancelled) break;
+    const task = homework.tasks[i];
     
-    buffer = await client.submitAnswer(activityId, chosenRef, chosenText);
-    correct++;
-    item++;
+    onLog(`Starting ${task.title}...`);
+
+    if (task.isTimesTables) {
+      const totalQuestions = 30;
+      const answersToSubmit = [];
+      for (let q = 0; q < totalQuestions; q++) {
+        if (signal.cancelled) break;
+        const num1 = Math.floor(Math.random() * 12) + 1;
+        const num2 = Math.floor(Math.random() * 12) + 1;
+        answersToSubmit.push(String(num1 * num2));
+        taskProgress[task.taskId].filled = q;
+        await updateUI(interaction, taskProgress, `**Times Tables**\n\nQuestion ${q + 1} of ${totalQuestions}\n\n${num1} × ${num2} = ?`);
+        await sleep(1000);
+      }
+      if (!signal.cancelled) {
+        try {
+          await client.submitTimesTables(packageId, task.taskId, answersToSubmit);
+          taskProgress[task.taskId].filled = totalQuestions;
+          totalCorrect += totalQuestions;
+        } catch (e) { onLog('Times Tables submit failed: ' + e.message); }
+      }
+      continue;
+    }
+
+    if (task.isFlashcards) {
+      taskProgress[task.taskId].filled = 10;
+      await updateUI(interaction, taskProgress, `Finishing Flashcards...`);
+      await sleep(2000);
+      continue;
+    }
+
+    try {
+      try {
+        const bwBuffer = await client.getBookworkCheck(packageId, task.taskId);
+        const bwCode = parseBookworkCode(bwBuffer);
+        if (bwCode) await client.submitBookworkCheck(packageId, task.taskId, bwCode);
+      } catch (e) { }
+
+      let item = 1;
+      let buffer = await client.getActivity(packageId, task.taskId, item);
+      let taskCorrect = 0;
+      const totalQuestions = 10;
+
+      while (item <= totalQuestions && !signal.cancelled) {
+        let { prompt, choices, activityId } = parseSparxQuestion(buffer);
+        
+        taskProgress[task.taskId].filled = item - 1;
+        await updateUI(interaction, taskProgress, `**${task.title}**\n\nQuestion ${item}: ${prompt}`);
+        
+        const cleanPrompt = prompt.replace(/\$/g, '');
+        const cleanChoices = choices.map(c => c.text.replace(/\$/g, ''));
+        
+        const normQ = { kind: 'multiple_choice', prompt: cleanPrompt, choices: cleanChoices, image: null, unit: null };
+        const geminiResp = await getAIanswer(normQ, session);
+        
+        let chosenRef = null;
+        const exact = choices.find(c => c.text.replace(/\$/g, '') === geminiResp.answer);
+        if (exact) chosenRef = exact.ref;
+        else {
+          const clean = geminiResp.answer.replace(/\s+/g, '').toLowerCase();
+          const close = choices.find(c => c.text.replace(/\$/g, '').replace(/\s+/g, '').toLowerCase() === clean);
+          if (close) chosenRef = close.ref;
+        }
+        if (!chosenRef) chosenRef = choices[0].ref;
+        const chosenText = choices.find(c => c.ref === chosenRef).text;
+
+        const waitMs = 8000 + Math.random() * 7000;
+        let waited = 0;
+        while (waited < waitMs) {
+          if (signal.cancelled) break;
+          await sleep(500);
+          waited += 500;
+        }
+        if (signal.cancelled) break;
+
+        buffer = await client.submitAnswer(activityId, chosenRef, chosenText);
+        
+        // Handle wrong answer (continue button)
+        if (buffer.length > 5000) {
+          onLog(`Wrong answer on ${task.title}. Continuing...`);
+          const { activityId: continueActId } = parseSparxQuestion(buffer);
+          if (continueActId) {
+            buffer = await client.continueActivity(continueActId);
+          }
+        } else {
+          taskCorrect++;
+        }
+        item++;
+      }
+
+      taskProgress[task.taskId].filled = totalQuestions;
+      totalCorrect += taskCorrect;
+      
+    } catch (err) {
+      onLog(`Failed to complete ${task.title}: ${err.message}`);
+    }
   }
-  
-  return { success: true, total: item - 1, correct };
+
+  return { success: true, totalCorrect };
+}
+
+async function updateUI(interaction, progress, text) {
+  const barBuf = renderMultiBar({ 
+    bars: Object.values(progress),
+    accent: '#0A78FF',
+    labelWidth: 160
+  });
+  const file = new AttachmentBuilder(barBuf, { name: 'progress.png' });
+
+  const embed = new EmbedBuilder()
+    .setColor(0x0A78FF)
+    .setAuthor({ name: 'Vobo AI · Sparx Maths' })
+    .setDescription(text)
+    .setImage('attachment://progress.png');
+
+  await interaction.editReply({ embeds: [embed], files: [file] }).catch(() => {});
 }
