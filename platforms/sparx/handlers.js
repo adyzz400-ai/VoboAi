@@ -8,7 +8,7 @@ import { buildSparxLoginModal } from './loginModal.js';
 import { buildSparxTimingModal } from './timingModal.js';
 import { buildSparxSettingsModal } from './settingsModal.js';
 import { sparxLogin } from './login.js';
-import { runSparxTask } from './autocompleter.js';
+import { runSparxPackage } from './autocompleter.js';
 import { queue } from '../../queue/index.js';
 import { Task } from '../../queue/task.js';
 import { config } from '../../utils/config.js';
@@ -72,13 +72,11 @@ export const sparxHandlers = {
           try {
             const client = new SparxClient(session);
             const listBuffer = await client.getHomeworkList();
-            const tasks = parseHomeworkList(listBuffer);
-            patchPlatform(interaction.user.id, 'sparx', { tasks: tasks });
+            const homeworkList = parseHomeworkList(listBuffer);
+            patchPlatform(interaction.user.id, 'sparx', { tasks: homeworkList });
           } catch (err) {
             warn('[sparx] task list failed: ' + err.message);
-            patchPlatform(interaction.user.id, 'sparx', { 
-              tasks: [{ taskId: '1812bb54-8fde-4ecb-8c85-d03aa439a11b', packageId: 'd2fb57b3-80a3-482a-9a54-167b069764ae', title: 'Homework', questionCount: 10, correctCount: 0, status: 'new' }] 
-            });
+            patchPlatform(interaction.user.id, 'sparx', { tasks: [] });
           }
 
           const panel = await buildPanel({ interaction: interaction });
@@ -144,10 +142,10 @@ export const sparxHandlers = {
     const accent = accentFor(userId);
 
     if (!session?.jwt) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Session expired. Re-login.' });
-    if (!session.selectedTaskId) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Pick a task from the dropdown first.' });
+    if (!session.selectedTaskId) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Pick a homework from the dropdown first.' });
 
-    const taskRow = (session.tasks || []).find(t => String(t.taskId) === String(session.selectedTaskId));
-    if (!taskRow) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Selected task not found.' });
+    const homework = (session.tasks || []).find(t => String(t.packageId) === String(session.selectedTaskId));
+    if (!homework) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Selected homework not found.' });
 
     const ackEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Sparx' }).setDescription('📥 Opening DM. Progress will stream there.');
     await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [ackEmbed] });
@@ -163,21 +161,20 @@ export const sparxHandlers = {
 
     const signal = { cancelled: false };
     const task = new Task({
-      userId: userId, kind: 'run', timeoutMs: 30 * 60 * 1000,
+      userId: userId, kind: 'run', timeoutMs: 60 * 60 * 1000,
       run: async function () {
         try {
-          const summary = await runSparxTask({
+          const summary = await runSparxPackage({
             session, 
-            packageId: taskRow.packageId,
-            taskId: taskRow.taskId,
-            taskName: taskRow.title,
+            packageId: homework.packageId,
+            homework: homework,
             interaction: { editReply: (opts) => progressMsg.edit(opts) },
             signal,
             onLog: (txt) => log('[sparx] ' + txt)
           });
 
-          const finalEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · session complete' })
-            .setDescription(`Task finished!\nScore: ${summary.correct} / ${summary.total}`);
+          const finalEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Homework complete' })
+            .setDescription(`Finished all tasks in the homework!\nTotal correct: ${summary.totalCorrect}`);
           
           await progressMsg.edit({ embeds: [finalEmbed] });
         } catch (e) {
