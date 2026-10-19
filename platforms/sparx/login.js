@@ -20,27 +20,16 @@ export async function sparxLogin({ school, username, password, onStatus }) {
     page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    // --- NETWORK INTERCEPTOR ---
-    let capturedJwt = null;
     let capturedSessionId = null;
 
     page.on('response', async (response) => {
       const url = response.url();
-      if (url.includes('/session') || url.includes('/token')) {
+      if (url.endsWith('/session')) {
         try {
-          const text = await response.text();
-          // Sometimes it's a raw JWT string, sometimes it's JSON
-          if (text.startsWith('eyJ')) {
-            capturedJwt = text.trim();
-          } else {
-            const json = JSON.parse(text);
-            if (json.accessToken) capturedJwt = json.accessToken;
-            if (json.token) capturedJwt = json.token;
-            if (json.session_id) capturedSessionId = json.session_id;
-            if (json.sessionId) capturedSessionId = json.sessionId;
-          }
-          if (capturedJwt) {
-            log('[sparx-login] Intercepted JWT from network response: ' + url);
+          const json = await response.json();
+          if (json.sessionID) {
+            capturedSessionId = json.sessionID;
+            log('[sparx-login] Captured Session ID: ' + capturedSessionId);
           }
         } catch (e) {}
       }
@@ -85,21 +74,20 @@ export async function sparxLogin({ school, username, password, onStatus }) {
       { timeout: 25000 }
     ).catch(() => log('[sparx-login] Redirect timeout, checking state...'));
     
-    // Give the SPA time to make the API calls
     await new Promise(r => setTimeout(r, 5000));
 
     step('capturing tokens');
     const cookies = await page.cookies();
     const cookieString = cookies.map(c => c.name + '=' + c.value).join('; ');
-
-    if (!capturedJwt) {
-      throw new Error('Login failed - could not intercept JWT from network traffic.');
+    
+    if (!capturedSessionId) {
+      throw new Error('Login failed - could not capture sessionID from network.');
     }
 
     step('login successful');
     return { 
-      jwt: capturedJwt, 
-      sessionId: capturedSessionId || 'none', 
+      jwt: 'cookie-based-auth', 
+      sessionId: capturedSessionId, 
       cookie: cookieString, 
       school, 
       username 
