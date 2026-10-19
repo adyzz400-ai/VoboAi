@@ -1,6 +1,6 @@
 // language: JavaScript (ESM), file: platforms/index.js
-// *Single source of truth for the hub. Adding Sparx later = one more entry + a folder.*
 import * as educake from './educake/panel.js';
+import * as sparx from './sparx/panel.js';
 
 export const PLATFORMS = {
   educake: {
@@ -15,6 +15,19 @@ export const PLATFORMS = {
       { id: 'educake-google', label: 'Educake (Google)',    available: false },
     ],
     panel: educake.buildPanel,
+  },
+  sparx: {
+    id: 'sparx',
+    name: 'Sparx Maths',
+    glyph: '📐',
+    accent: '#0A78FF',
+    available: true,
+    loginVariants: [
+      { id: 'sparx',        label: 'Sparx (username)',  available: true  },
+      { id: 'sparx-ms',     label: 'Sparx (Microsoft)', available: false },
+      { id: 'sparx-google', label: 'Sparx (Google)',    available: false },
+    ],
+    panel: sparx.buildPanel,
   },
 };
 
