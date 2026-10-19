@@ -15,13 +15,7 @@ export async function sparxLogin({ school, username, password, onStatus }) {
     browser = await puppeteerExtra.launch({
       executablePath: config.chromePath,
       headless: 'new',
-      args: [
-        '--no-sandbox', 
-        '--disable-setuid-sandbox', 
-        '--disable-dev-shm-usage', 
-        '--disable-gpu',
-        '--disable-software-rasterizer'
-      ],
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
     });
     page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
@@ -34,7 +28,6 @@ export async function sparxLogin({ school, username, password, onStatus }) {
     await page.click('input[type="text"]');
     await page.type('input[type="text"]', school, { delay: 50 });
     
-    // Wait for the dropdown to populate
     await new Promise(r => setTimeout(r, 2500));
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
@@ -61,7 +54,7 @@ export async function sparxLogin({ school, username, password, onStatus }) {
 
     step('submitting login');
     await Promise.all([
-      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => null),
+      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => null),
       page.evaluate(() => {
         const btns = Array.from(document.querySelectorAll('button'));
         const btn = btns.find(b => b.textContent.trim().toLowerCase() === 'log in');
@@ -70,10 +63,8 @@ export async function sparxLogin({ school, username, password, onStatus }) {
       })
     ]);
 
-    const urlAfter = page.url();
-    if (urlAfter.includes('login') || urlAfter.includes('select-school')) {
-      throw new Error('Login failed - still on login/select page.');
-    }
+    // Wait a few seconds for SPA to load
+    await new Promise(r => setTimeout(r, 3000));
 
     step('capturing tokens');
     const tokens = await page.evaluate(() => {
@@ -83,24 +74,42 @@ export async function sparxLogin({ school, username, password, onStatus }) {
           for (let i = 0; i < s.length; i++) {
             const k = s.key(i);
             const v = s.getItem(k);
-            if (isJwt(v)) return v;
+            if (isJwt(v)) return { source: 'storage', key: k, jwt: v };
           }
         }
         return null;
       };
       return {
-        jwt: findToken(),
-        sessionId: localStorage.getItem('session_id') || sessionStorage.getItem('session_id') || null
+        found: findToken(),
+        localStorageKeys: Object.keys(localStorage),
+        sessionStorageKeys: Object.keys(sessionStorage)
       };
     });
 
+    log('[sparx-login] Storage keys: ' + JSON.stringify(tokens.localStorageKeys) + ' ' + JSON.stringify(tokens.sessionStorageKeys));
+
+    if (tokens.found) {
+      log('[sparx-login] JWT found in ' + tokens.found.key);
+    } else {
+      log('[sparx-login] JWT not found in storage, checking cookies...');
+    }
+
     const cookies = await page.cookies();
     const cookieString = cookies.map(c => c.name + '=' + c.value).join('; ');
-    
-    if (!tokens.jwt) throw new Error('JWT not found in storage after login.');
+    const sessionCookie = cookies.find(c => c.name === 'spxlrn_session');
+
+    if (!tokens.found && !sessionCookie) {
+      throw new Error('Login failed - no JWT or session cookie found.');
+    }
 
     step('login successful');
-    return { jwt: tokens.jwt, sessionId: tokens.sessionId, cookie: cookieString, school, username };
+    return { 
+      jwt: tokens.found ? tokens.found.jwt : 'cookie-only-session', 
+      sessionId: tokens.found ? (localStorage.getItem('session_id') || sessionStorage.getItem('session_id')) : 'cookie-only-session', 
+      cookie: cookieString, 
+      school, 
+      username 
+    };
 
   } finally {
     if (browser) {
