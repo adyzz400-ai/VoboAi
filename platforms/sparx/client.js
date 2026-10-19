@@ -14,15 +14,23 @@ export class SparxClient {
     frame.writeUInt32BE(length, 1);
     payloadBuffer.copy(frame, 5);
 
+    // The token must be sent as "bearer <jwt>"
+    const authHeader = this.session.jwt.startsWith('bearer ') 
+      ? this.session.jwt 
+      : 'bearer ' + this.session.jwt;
+
     const headers = {
       'accept': '*/*',
+      'authorization': authHeader,
+      'x-session-id': this.session.sessionId,
       'content-type': 'application/grpc-web+proto',
       'x-grpc-web': '1',
       'origin': 'https://maths.sparx-learning.com',
       'referer': 'https://maths.sparx-learning.com/',
-      'cookie': this.session.cookie,
-      'x-session-id': this.session.sessionId
+      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     };
+
+    log('[sparx] POST ' + path + ' | Auth: ' + authHeader.slice(0, 20) + '... | Session: ' + this.session.sessionId);
 
     const res = await fetch(this.baseUrl + path, {
       method: 'POST',
