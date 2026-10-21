@@ -58,11 +58,37 @@ function timestampFromField(buf, field) {
   return null;
 }
 
+function getXpData(pm, pkgBytes) {
+  let targetXp = null, doneXp = null;
+  const xpFields = pm.get(6) || [];
+  if (xpFields.length > 0) {
+    const nested = byTag(pkgBytes, xpFields[0].payloadStart, xpFields[0].payloadEnd);
+    const f1 = (nested.get(1) || [])[0];
+    if (f1) {
+      const inner = byTag(pkgBytes, f1.payloadStart, f1.payloadEnd);
+      for (const t of inner.get(3) || []) {
+        const u = byTag(pkgBytes, t.payloadStart, t.payloadEnd);
+        let k = null, v = null;
+        for (const [tag, fs] of u) {
+          for (const f of fs) {
+            if (tag === 1) k = str(pkgBytes, f);
+            if (tag === 2 && f.wt === 1) v = pkgBytes.readDoubleLE(f.payloadStart);
+          }
+        }
+        if (k === 'C') doneXp = v;
+        if (k === 'T') targetXp = v;
+      }
+    }
+  }
+  return { targetXp, doneXp };
+}
+
 function extractTasksFromBytes(pkgBytes) {
   const tasks = [];
   const seen = new Set();
   const pm = byTag(pkgBytes, 0, pkgBytes.length);
 
+  // Try field 11
   for (const tf of pm.get(11) || []) {
     const tBytes = sub(pkgBytes, tf);
     const tm = byTag(tBytes, 0, tBytes.length);
@@ -75,20 +101,17 @@ function extractTasksFromBytes(pkgBytes) {
     seen.add(taskId);
 
     const taskTitle = ((tm.get(2) || [])[0] && str(tBytes, (tm.get(2) || [])[0])) || 'Task';
-    
-    // REAL ACCURACY: Read numTaskItems (field 6) and numTaskItemsDone (field 7)
     const totalField = (tm.get(6) || [])[0];
     const doneField = (tm.get(7) || [])[0];
     const total = totalField ? Number(readVarint(tBytes, totalField.payloadStart).value) : 1;
     const done = doneField ? Number(readVarint(tBytes, doneField.payloadStart).value) : 0;
-    const accuracy = Math.round((done / total) * 100) + '%';
-
+    
     tasks.push({
       taskId, title: taskTitle,
       isFlashcards: /flash\s*cards?/i.test(taskTitle),
       isTimesTables: /times\s*tables/i.test(taskTitle),
       hasBookworkCheck: !/flash\s*cards?/i.test(taskTitle) && !/times\s*tables/i.test(taskTitle),
-      accuracy
+      accuracy: Math.round((done / total) * 100) + '%'
     });
   }
   return tasks;
@@ -180,7 +203,13 @@ export function parseHomeworkList(buffer) {
       else title = t;
     }
 
-    packages.push({ packageId, title, dueText, accuracy: '0%', tasks: [] });
+    const { targetXp, doneXp } = getXpData(pm, pkgBytes);
+    let percent = 0;
+    if (targetXp && targetXp > 0 && doneXp != null) {
+      percent = Math.min(100, Math.round((doneXp / targetXp) * 100));
+    }
+
+    packages.push({ packageId, title, dueText, accuracy: percent + '%', tasks: [] });
   }
   return packages;
 }
@@ -190,36 +219,60 @@ export function parseGetPackage(buffer) {
   const raw = unframe(buffer);
   const top = byTag(raw, 0, raw.length);
   
+  // DIAGNOSTIC LOG
+  const tags = Array.from(top.keys()).join(',');
+  console.log(`[sparx] GetPackage top-level tags: ${tags}`);
+
+  let pkgBytes = null;
+  let packageId = null, title = 'Homework', dueDate = null;
+
+  // Try nested (packageactivity format)
   const f = (top.get(1) || [])[0];
-  if (!f) return null;
-  const pkgBytes = sub(raw, f);
-  const pm = byTag(pkgBytes, 0, pkgBytes.length);
-
-  const pathF = (pm.get(1) || [])[0];
-  if (!pathF) return null;
-  const pkgMatch = str(pkgBytes, pathF).match(/packages\/([0-9a-f-]{36})/i);
-  if (!pkgMatch) return null;
-  const packageId = pkgMatch[1].toLowerCase();
-
-  let title = 'Homework';
-  const titleF = (pm.get(2) || [])[0];
-  if (titleF) {
-    const t = str(pkgBytes, titleF).trim();
-    const match = t.match(/^(.+?)\s+due\s+(.+)$/i);
-    if (match) title = match[1].trim(); else title = t;
+  if (f) {
+    pkgBytes = sub(raw, f);
+    const pm = byTag(pkgBytes, 0, pkgBytes.length);
+    const pathF = (pm.get(1) || [])[0];
+    if (pathF) {
+      const m = str(pkgBytes, pathF).match(/packages\/([0-9a-f-]{36})/i);
+      if (m) {
+        packageId = m[1].toLowerCase();
+        const titleF = (pm.get(2) || [])[0];
+        if (titleF) {
+          const t = str(pkgBytes, titleF).trim();
+          const match = t.match(/^(.+?)\s+due\s+(.+)$/i);
+          if (match) title = match[1].trim(); else title = t;
+        }
+        const dueField = (pm.get(9) || [])[0];
+        if (dueField) {
+          const d = timestampFromField(pkgBytes, dueField);
+          if (d) dueDate = d.toISOString();
+        }
+      }
+    }
   }
 
-  let dueDate = null;
-  const dueField = (pm.get(9) || [])[0];
-  if (dueField) {
-    const d = timestampFromField(pkgBytes, dueField);
-    if (d) dueDate = d.toISOString();
+  if (!pkgBytes) {
+    // Try flat (swworker format) if no field 1
+    const t = (top.get(2) || [])[0];
+    if (!t) return null;
+    // If we have tasks directly, we still need the package ID. 
+    // For now, return null if we can't find the package ID.
+    console.log('[sparx] parseGetPackage: No field 1 package found.');
+    return null;
+  }
+
+  const pm = byTag(pkgBytes, 0, pkgBytes.length);
+  const innerTags = Array.from(pm.keys()).join(',');
+  console.log(`[sparx] GetPackage inner tags: ${innerTags}`);
+
+  const { targetXp, doneXp } = getXpData(pm, pkgBytes);
+  let percent = 0;
+  if (targetXp && targetXp > 0 && doneXp != null) {
+    percent = Math.min(100, Math.round((doneXp / targetXp) * 100));
   }
 
   const tasks = extractTasksFromBytes(pkgBytes);
-  let totalAcc = 0;
-  tasks.forEach(t => totalAcc += parseInt(t.accuracy) || 0);
-  const pkgAcc = tasks.length > 0 ? Math.round(totalAcc / tasks.length) + '%' : '0%';
+  console.log(`[sparx] parseGetPackage extracted ${tasks.length} tasks.`);
 
-  return { packageId, title, dueDate, accuracy: pkgAcc, tasks };
+  return { packageId, title, dueDate, accuracy: percent + '%', tasks };
 }
