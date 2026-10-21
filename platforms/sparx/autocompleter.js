@@ -14,10 +14,9 @@ import { SparxClient } from './client.js';
 import { renderMultiBar } from '../../utils/progressBar.js';
 
 function waitWindow(session) {
-  const w =
-    session && session.waits ? session.waits : { min: 8, max: 15 };
+  const w = session && session.waits ? session.waits : { min: 8, max: 15 };
   const minMs = Math.max(1, Number(w.min) || 8) * 1000;
-  const maxMs = Math.max(minMs, Number(w.max) || 15) * 1000;
+  const maxMs = Math.max(minMs, (Number(w.max) || 15) * 1000);
   return { minMs, maxMs };
 }
 
