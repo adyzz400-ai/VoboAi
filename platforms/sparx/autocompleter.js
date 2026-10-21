@@ -14,7 +14,7 @@ import { log, warn } from '../../utils/logger.js';
 import { sleep } from '../../utils/formatTime.js';
 import { submitAnswer, finishQuiz } from './quizzes.js';
 import { coerceGivenAnswer } from './parser.js';
-import { getAIanswer } from './getAIAnswer.js';
+import { getAIanswer } from '../educake/getAIanswer.js';
 import { getTheme } from '../../hub/sessionStore.js';
 import { renderSenAIProgressBar } from '../../utils/senaiLayout.js';
 
