@@ -89,7 +89,8 @@ export async function runSparxPackage({
           questionsCompleted,
           totalQuestions,
           totalCorrect + ttCorrect,
-          startTime
+          startTime,
+          null
         );
 
         try {
@@ -169,7 +170,8 @@ export async function runSparxPackage({
           questionsCompleted,
           totalQuestions,
           totalCorrect + taskCorrect,
-          startTime
+          startTime,
+          '🤖 Thinking…'
         );
 
         const cleanPrompt = String(prompt || '').replace(/\$/g, '');
@@ -182,7 +184,7 @@ export async function runSparxPackage({
               type === 'text' ? 'short_answer' : 'multiple_choice',
             prompt: cleanPrompt,
             choices: cleanChoices,
-            image: parsed.image || null, // <--- PASSED IMAGE HERE
+            image: parsed.image || null,
             unit: null
           },
           session
@@ -217,8 +219,23 @@ export async function runSparxPackage({
         let waited = 0;
         while (waited < waitMs) {
           if (signal.cancelled) break;
-          await sleep(500);
-          waited += 500;
+          await sleep(1000);
+          waited += 1000;
+          const remaining = Math.max(0, Math.ceil((waitMs - waited) / 1000));
+          if (remaining > 0) {
+            await updateUI(
+              interaction,
+              taskProgress,
+              homework,
+              task.title,
+              prompt,
+              questionsCompleted,
+              totalQuestions,
+              totalCorrect + taskCorrect,
+              startTime,
+              '⏳ Waiting **' + remaining + 's** before answering…'
+            );
+          }
         }
         if (signal.cancelled) break;
 
@@ -311,7 +328,8 @@ async function updateUI(
   qCompleted,
   qTotal,
   score,
-  startTime
+  startTime,
+  statusText
 ) {
   const barBuf = renderMultiBar({
     bars: Object.values(progress),
@@ -338,6 +356,7 @@ async function updateUI(
         '\n' +
         '**Status**: ' +
         currentTaskName +
+        (statusText ? ' (' + statusText + ')' : '') +
         '\n' +
         '**Question**: ' +
         String(questionText).slice(0, 150) +
