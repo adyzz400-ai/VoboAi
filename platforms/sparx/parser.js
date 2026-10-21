@@ -1,386 +1,186 @@
 // language: JavaScript (ESM), file: platforms/sparx/parser.js
 
-function readVarint(buf, offset) {
-  let result = 0n;
-  let shift = 0n;
-  let pos = offset;
-  while (pos < buf.length) {
-    const byte = buf[pos++];
-    result |= BigInt(byte & 0x7f) << shift;
-    if ((byte & 0x80) === 0) break;
-    shift += 7n;
-    if (shift > 70n) throw new Error('varint too long');
-  }
-  return { value: result, next: pos };
+// --- protobuf walker ---
+function readVarint(buf, pos) {
+  let result = 0n, shift = 0n, byte;
+  do { byte = buf[pos++]; result |= BigInt(byte & 0x7f) << shift; shift += 7n; if (shift > 70n) throw new Error('varint too long'); } while (byte & 0x80);
+  return { value: result, pos };
 }
-
-function walkProtobuf(buf, depth, maxDepth) {
-  if (depth === undefined) depth = 0;
-  if (maxDepth === undefined) maxDepth = 6;
-  const fields = [];
-  let pos = 0;
-  const end = buf.length;
-
+function* fields(buf, start = 0, end = buf.length) {
+  let pos = start;
   while (pos < end) {
-    try {
-      const tagRes = readVarint(buf, pos);
-      pos = tagRes.next;
-      const tag = Number(tagRes.value);
-      const fieldNumber = tag >>> 3;
-      const wireType = tag & 0x7;
-
-      if (wireType === 0) {
-        const v = readVarint(buf, pos);
-        pos = v.next;
-        fields.push({
-          fieldNumber: fieldNumber,
-          wireType: 0,
-          value: Number(v.value)
-        });
-      } else if (wireType === 1) {
-        if (pos + 8 > end) break;
-        pos += 8;
-        fields.push({ fieldNumber: fieldNumber, wireType: 1 });
-      } else if (wireType === 2) {
-        const lenRes = readVarint(buf, pos);
-        pos = lenRes.next;
-        const len = Number(lenRes.value);
-        if (len < 0 || pos + len > end) break;
-        const slice = buf.subarray(pos, pos + len);
-        pos += len;
-
-        let asString = null;
-        try {
-          const s = Buffer.from(slice).toString('utf8');
-          if (s.length > 0 && !/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(s)) {
-            asString = s;
-          }
-        } catch (_) {}
-
-        const entry = {
-          fieldNumber: fieldNumber,
-          wireType: 2,
-          string: asString,
-          nested: null
-        };
-
-        if (!asString && depth < maxDepth && len > 0) {
-          try {
-            entry.nested = walkProtobuf(slice, depth + 1, maxDepth);
-          } catch (_) {}
-        }
-
-        fields.push(entry);
-      } else if (wireType === 5) {
-        if (pos + 4 > end) break;
-        pos += 4;
-        fields.push({ fieldNumber: fieldNumber, wireType: 5 });
-      } else {
-        break;
-      }
-    } catch (_) {
-      break;
-    }
-  }
-  return fields;
-}
-
-function timestampFromField(f) {
-  if (!f || !f.nested) return null;
-  let seconds = null;
-  for (const s of f.nested) {
-    if (s.fieldNumber === 1 && s.wireType === 0) {
-      seconds = s.value;
-      break;
-    }
-  }
-  if (seconds == null) return null;
-  try {
-    return new Date(seconds * 1000);
-  } catch (_) {
-    return null;
+    const { value: key, pos: p1 } = readVarint(buf, pos); pos = p1;
+    const tag = Number(key >> 3n), wt = Number(key & 7n);
+    let ps = pos, pe = pos;
+    if (wt === 0) pe = readVarint(buf, pos).pos;
+    else if (wt === 1) pe = pos + 8;
+    else if (wt === 2) { const { value: len, pos: p2 } = readVarint(buf, pos); ps = p2; pe = p2 + Number(len); }
+    else if (wt === 5) pe = pos + 4;
+    else return;
+    yield { tag, wt, payloadStart: ps, payloadEnd: pe };
+    pos = pe;
   }
 }
-
-function packagesFromRawWalk(fields) {
-  const packages = [];
-
-  for (const top of fields) {
-    if (top.fieldNumber !== 1 || !top.nested) continue;
-
-    const pkg = {
-      packageID: null,
-      title: 'Homework',
-      dueDate: null,
-      numTaskItems: 0,
-      numTaskItemsDone: 0,
-      numTasks: 0,
-      numTasksComplete: 0,
-      percent: 0
-    };
-
-    let targetXp = null;
-    let doneXp = null;
-
-    for (const f of top.nested) {
-      if (f.fieldNumber === 1 && f.string) {
-        const m = f.string.match(/packages\/([0-9a-f-]{36})/i);
-        if (m) pkg.packageID = m[1];
-        continue;
-      }
-
-      if (f.fieldNumber === 2 && f.string) {
-        const raw = f.string.trim();
-        const dueMatch = raw.match(/^(.+?)\s+due\s+(.+)$/i);
-        if (dueMatch) {
-          pkg.title =
-            dueMatch[1].replace(/^[^A-Za-z0-9]+/, '').trim() || 'Homework';
-        } else if (raw.length > 0 && raw.length < 80) {
-          pkg.title = raw.replace(/^[^A-Za-z0-9]+/, '').trim() || 'Homework';
-        }
-        continue;
-      }
-
-      if (f.fieldNumber === 4 && f.string) {
-        pkg.title = f.string.trim() || pkg.title;
-        continue;
-      }
-
-      if (f.fieldNumber === 6 && f.wireType === 0) {
-        pkg.numTasks = f.value;
-        continue;
-      }
-      if (f.fieldNumber === 7 && f.wireType === 0) {
-        pkg.numTaskItems = f.value;
-        continue;
-      }
-      if (f.fieldNumber === 8 && f.wireType === 0) {
-        pkg.numTaskItemsDone = f.value;
-        continue;
-      }
-      if (f.fieldNumber === 10 && f.wireType === 0) {
-        pkg.numTasksComplete = f.value;
-        continue;
-      }
-
-      if (f.fieldNumber === 9 && f.nested) {
-        const d = timestampFromField(f);
-        if (d) pkg.dueDate = d;
-        continue;
-      }
-
-      // XP-style nested scores (older builds)
-      if (f.fieldNumber === 6 && f.nested) {
-        for (const s of f.nested) {
-          if (s.fieldNumber === 1 && s.nested) {
-            for (const t of s.nested) {
-              if (t.fieldNumber === 1 && t.wireType === 1) {
-                // skip
-              }
-            }
-          }
-        }
-      }
-    }
-
-    if (targetXp && targetXp > 0) {
-      pkg.numTaskItems = Math.round(targetXp);
-      pkg.numTasks = pkg.numTaskItems;
-      if (doneXp != null) {
-        pkg.numTaskItemsDone = Math.round(doneXp);
-        pkg.numTasksComplete = pkg.numTaskItemsDone;
-        pkg.percent = Math.min(
-          100,
-          Math.round((doneXp / targetXp) * 100)
-        );
-      }
-    }
-
-    if (pkg.numTaskItems > 0 && pkg.numTasks === 0) {
-      pkg.numTasks = pkg.numTaskItems;
-    }
-    if (pkg.numTaskItemsDone > 0 && pkg.numTaskItems > 0) {
-      pkg.percent = Math.min(
-        100,
-        Math.round((pkg.numTaskItemsDone / pkg.numTaskItems) * 100)
-      );
-    }
-
-    if (pkg.packageID) packages.push(pkg);
-  }
-
-  return packages;
+function sub(buf, f) { return buf.subarray(f.payloadStart, f.payloadEnd); }
+function str(buf, f) { return sub(buf, f).toString('utf8'); }
+function byTag(buf, start, end) {
+  const m = new Map();
+  for (const f of fields(buf, start, end)) { if (!m.has(f.tag)) m.set(f.tag, []); m.get(f.tag).push(f); }
+  return m;
+}
+function unframe(buf) {
+  if (!buf || buf.length < 5) return buf;
+  if (buf[0] & 0x80) return Buffer.alloc(0);
+  const len = buf.readUInt32BE(1);
+  return (5 + len <= buf.length) ? buf.subarray(5, 5 + len) : buf.subarray(5);
 }
 
-function stripGrpcFrame(buffer) {
-  if (!buffer || buffer.length < 5) return buffer;
-  // gRPC-web: 1 byte flag + 4 byte BE length
-  const flag = buffer[0];
-  if (flag === 0x00 || flag === 0x01) {
-    const len = buffer.readUInt32BE(1);
-    if (len > 0 && len + 5 <= buffer.length) {
-      return buffer.subarray(5, 5 + len);
-    }
-  }
-  return buffer;
-}
-
-export function parseHomeworkList(buffer) {
-  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) {
-    return [];
-  }
-
-  const payload = stripGrpcFrame(buffer);
-  let rawFields = [];
-  try {
-    rawFields = walkProtobuf(payload);
-  } catch (_) {
-    rawFields = [];
-  }
-
-  let rawPackages = packagesFromRawWalk(rawFields);
-
-  // string fallback if walk found nothing
-  if (rawPackages.length === 0) {
-    const str = payload.toString('utf8');
-    const re = /packages\/([0-9a-f-]{36})/gi;
-    let m;
-    const seen = new Set();
-    while ((m = re.exec(str)) !== null) {
-      const id = m[1].toLowerCase();
-      if (seen.has(id)) continue;
-      seen.add(id);
-      rawPackages.push({
-        packageID: id,
-        title: 'Homework',
-        dueDate: null,
-        numTasks: 0,
-        numTaskItems: 0,
-        numTaskItemsDone: 0,
-        numTasksComplete: 0,
-        percent: 0
-      });
-    }
-  }
-
-  const out = [];
-  for (const p of rawPackages) {
-    const taskCount = Math.max(p.numTasks || 0, p.numTaskItems || 0, 1);
-    const tasks = [];
-    for (let i = 1; i <= taskCount; i++) {
-      tasks.push({
-        taskId: p.packageID + '-task-' + i,
-        title: 'Task ' + i,
-        isTimesTables: false,
-        isFlashcards: false
-      });
-    }
-
-    const due =
-      p.dueDate instanceof Date
-        ? p.dueDate.toISOString()
-        : new Date(Date.now() + 7 * 86400000).toISOString();
-
-    out.push({
-      packageId: p.packageID,
-      rawPackageId: p.packageID,
-      title: p.title || 'Homework',
-      dueDate: due,
-      accuracy: String(p.percent || 0) + '%',
-      tasks: tasks,
-      numTasks: taskCount,
-      numTaskItems: p.numTaskItems || taskCount,
-      numTaskItemsDone: p.numTaskItemsDone || 0
-    });
-  }
-
-  return out;
-}
-
+// --- question parser ---
 export function parseSparxQuestion(buffer) {
-  const str = buffer.toString('utf8');
-  const start = str.indexOf('{"layout"');
-  const end = str.lastIndexOf('}');
-
-  if (start === -1 || end === -1) {
-    throw new Error('Could not find JSON layout');
+  const framed = unframe(buffer);
+  const s = framed.toString('utf8');
+  const jStart = s.indexOf('[{"layout"');
+  if (jStart === -1) throw new Error('Could not find JSON layout');
+  let depth = 0, jEnd = -1;
+  for (let i = jStart; i < s.length; i++) {
+    const c = s[i];
+    if (c === '[') depth++;
+    else if (c === ']') { depth--; if (depth === 0) { jEnd = i + 1; break; } }
   }
+  if (jEnd === -1) throw new Error('Could not find JSON close');
+  const layout = JSON.parse(s.slice(jStart, jEnd));
 
-  const data = JSON.parse(str.slice(start, end + 1));
-  const actMatch = str.match(/\/activities\/([a-z0-9-]+)/);
+  const actMatch = s.match(/\/activities\/([a-z0-9-]{36})/);
   const activityId = actMatch ? actMatch[1] : null;
 
-  const layoutType =
-    data.layout && data.layout.type ? data.layout.type : [];
-  const isSlot =
-    layoutType.includes('multi-part') ||
-    layoutType.includes('interleaved-question-answer');
+  const root = layout[0]?.layout ?? layout.layout;
+  if (!root) throw new Error('No layout root');
 
-  if (isSlot) {
-    let prompt = '';
-    let choices = [];
-    try {
-      const cardsGroup = data.layout.content[0];
-      const partGroup = data.layout.content[1];
-      if (cardsGroup && Array.isArray(cardsGroup.content)) {
-        choices = cardsGroup.content.map((c) => {
-          const text =
-            c.content && c.content[0] && c.content[0].text
-              ? c.content[0].text
-              : '';
-          return { ref: c.ref, text: text };
-        });
-      }
-      if (partGroup && Array.isArray(partGroup.content)) {
-        const parts = [];
-        const walk = (nodes) => {
-          if (!Array.isArray(nodes)) return;
-          for (const n of nodes) {
-            if (n.element === 'text' && n.text) parts.push(n.text);
-            if (n.content) walk(n.content);
-          }
-        };
-        walk(partGroup.content);
-        prompt = parts.join(' ');
-      }
-    } catch (_) {
-      prompt = 'Flashcard question';
+  const promptParts = [];
+  const choices = [];
+  const slots = [];
+
+  function walk(node) {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    if (node.element === 'text' && typeof node.text === 'string') { promptParts.push(node.text); return; }
+    if (node.element === 'card' || node.element === 'choice') {
+      choices.push({ ref: node.ref, text: node.content?.[0]?.text ?? '' });
+      return;
     }
-    return {
-      prompt: prompt || 'Flashcard question',
-      choices: choices,
-      activityId: activityId,
-      type: 'slot'
-    };
+    if (node.element === 'slot') { slots.push({ ref: node.ref, accept: node.accept }); promptParts.push('___'); return; }
+    if (node.element === 'text-field' || node.element === 'number-field') {
+      slots.push({ ref: node.ref, kind: node.element });
+      promptParts.push('___');
+      return;
+    }
+    if (Array.isArray(node.content)) node.content.forEach(walk);
   }
+  walk(root);
 
-  let prompt = '';
-  let choices = [];
-  try {
-    prompt = data.layout.content[0].content[0].content[0].text;
-    const choicesObj = data.layout.content[1].content[0].content;
-    choices = choicesObj.map((c) => ({
-      ref: c.ref,
-      text: c.content[0].text
-    }));
-  } catch (_) {
-    prompt = 'Question';
-    choices = [];
+  const prompt = promptParts.join(' ').replace(/\s+/g, ' ').trim();
+
+  // Dispatch: text-field wins first, then card-slot, then MC
+  const numFields = Object.keys(root.input?.number_fields || {});
+  const txtFields = Object.keys(root.input?.text_fields || {});
+  if (numFields.length > 0 || txtFields.length > 0) {
+    const ref = numFields[0] || txtFields[0];
+    return { prompt, choices: [], textField: { ref, kind: numFields.length > 0 ? 'number' : 'text' }, activityId, type: 'text' };
   }
-
-  return {
-    prompt: prompt,
-    choices: choices,
-    activityId: activityId,
-    type: 'multiple'
-  };
+  if (slots.length > 0) return { prompt, choices, slots, activityId, type: 'slot' };
+  return { prompt, choices, activityId, type: 'multiple' };
 }
 
 export function parseBookworkCode(buffer) {
-  const str = buffer.toString('utf8');
-  const match =
-    str.match(/<choice>(.*?)<\/choice>/) ||
-    str.match(/<number>(.*?)<\/number>/);
-  if (match) return match[1];
-  return null;
+  const s = unframe(buffer).toString('utf8');
+  const m = s.match(/<choice>(.*?)<\/choice>/) || s.match(/<number>(.*?)<\/number>/);
+  return m ? m[1] : null;
+}
+
+// --- homework list parser (packages only; GetPackage enriches tasks) ---
+export function parseHomeworkList(buffer) {
+  const raw = unframe(buffer);
+  const top = byTag(raw, 0, raw.length);
+  const packages = [];
+
+  for (const f of top.get(1) ?? []) {
+    const pkgBytes = sub(raw, f);
+    const pm = byTag(pkgBytes, 0, pkgBytes.length);
+
+    const pathF = pm.get(1)?.[0];
+    if (!pathF) continue;
+    const pkgMatch = str(pkgBytes, pathF).match(/^-packages\/([0-9a-f-]{36})$/);
+    if (!pkgMatch) continue;
+    const packageId = pkgMatch[1];
+
+    const title = (pm.get(2)?.[0] && str(pkgBytes, pm.get(2)[0])) || 'Homework';
+
+    let assignmentId = null;
+    for (const p of pm.get(4) ?? []) {
+      const m = str(pkgBytes, p).match(/assignments\/([0-9a-f-]{36})$/);
+      if (m) { assignmentId = m[1]; break; }
+    }
+
+    packages.push({ packageId, assignmentId: assignmentId || packageId, title, dueDate: null, tasks: [] });
+  }
+  return packages;
+}
+
+// --- GetPackage parser: real task tree + due date ---
+export function parseGetPackage(buffer) {
+  const raw = unframe(buffer);
+  const top = byTag(raw, 0, raw.length);
+  const f = top.get(1)?.[0];
+  if (!f) return null;
+  const pkgBytes = sub(raw, f);
+  const pm = byTag(pkgBytes, 0, pkgBytes.length);
+
+  const pathF = pm.get(1)?.[0];
+  if (!pathF) return null;
+  const pkgMatch = str(pkgBytes, pathF).match(/^-packages\/([0-9a-f-]{36})$/);
+  if (!pkgMatch) return null;
+  const packageId = pkgMatch[1];
+
+  const title = (pm.get(2)?.[0] && str(pkgBytes, pm.get(2)[0])) || 'Homework';
+
+  let assignmentId = null;
+  for (const p of pm.get(4) ?? []) {
+    const m = str(pkgBytes, p).match(/assignments\/([0-9a-f-]{36})$/);
+    if (m) { assignmentId = m[1]; break; }
+  }
+
+  // Due-date: probe candidate tags. Real tag must be confirmed via one log pass;
+  // probe list covers the millis-carrying fields visible in the captures.
+  let dueDateMs = null;
+  for (const tag of [2, 8, 10, 12, 14]) {
+    for (const field of pm.get(tag) ?? []) {
+      let n = null;
+      if (field.wt === 0) n = Number(readVarint(pkgBytes, field.payloadStart).value);
+      else if (field.wt === 1) n = Number(pkgBytes.readBigUInt64LE(field.payloadStart));
+      if (n && n > 1_500_000_000_000 && n < 4_000_000_000_000) { dueDateMs = n; break; }
+    }
+    if (dueDateMs) break;
+  }
+  const dueDate = dueDateMs ? new Date(dueDateMs).toISOString() : null;
+
+  const tasks = [];
+  for (const tf of pm.get(11) ?? []) {
+    const tBytes = sub(pkgBytes, tf);
+    const tm = byTag(tBytes, 0, tBytes.length);
+    const tPath = tm.get(1)?.[0];
+    if (!tPath) continue;
+    const tMatch = str(tBytes, tPath).match(/tasks\/([0-9a-f-]{36})$/);
+    if (!tMatch) continue;
+    const taskId = tMatch[1];
+    const taskTitle = (tm.get(2)?.[0] && str(tBytes, tm.get(2)[0])) || 'Task';
+    tasks.push({
+      taskId,
+      title: taskTitle,
+      isFlashcards: taskTitle === 'Flashcards',
+      isTimesTables: taskTitle === 'Times Tables',
+      hasBookworkCheck: taskTitle !== 'Flashcards' && taskTitle !== 'Times Tables',
+    });
+  }
+
+  return { packageId, assignmentId: assignmentId || packageId, title, dueDate, tasks };
 }
