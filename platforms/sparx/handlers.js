@@ -1,5 +1,11 @@
 // language: JavaScript (ESM), file: platforms/sparx/handlers.js
-import { EmbedBuilder, MessageFlags } from 'discord.js';
+import {
+  EmbedBuilder,
+  MessageFlags,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle
+} from 'discord.js';
 import { log, warn } from '../../utils/logger.js';
 import {
   getPlatform,
@@ -78,9 +84,9 @@ export const sparxHandlers = {
       run: async function () {
         try {
           const session = await sparxLogin({
-            school,
-            username,
-            password,
+            school: school,
+            username: username,
+            password: password,
             onStatus: status
           });
 
@@ -107,17 +113,20 @@ export const sparxHandlers = {
 
             if (!listBuffer || !Buffer.isBuffer(listBuffer)) {
               warn('[sparx] ListStudentPackages returned non-buffer');
-              patchPlatform(interaction.user.id, 'sparx', { tasks: [] });
+              patchPlatform(interaction.user.id, 'sparx', {
+                tasks: []
+              });
             } else {
               log('[sparx] list buffer bytes=' + listBuffer.length);
               const baseList = parseHomeworkList(listBuffer);
 
-              // Enrich each package with its real task tree from GetPackage
               const homeworkList = [];
               let totalTasks = 0;
               for (const pkg of baseList) {
                 try {
-                  const pkgBuffer = await client.getPackage(pkg.packageId);
+                  const pkgBuffer = await client.getPackage(
+                    pkg.packageId
+                  );
                   const detailed = parseGetPackage(pkgBuffer);
                   if (detailed) {
                     pkg.tasks = detailed.tasks;
@@ -126,10 +135,13 @@ export const sparxHandlers = {
                   }
                 } catch (err) {
                   warn(
-                    `[sparx] GetPackage ${pkg.packageId} failed: ${err.message}`
+                    '[sparx] GetPackage ' +
+                      pkg.packageId +
+                      ' failed: ' +
+                      err.message
                   );
                 }
-                totalTasks += pkg.tasks.length;
+                totalTasks += (pkg.tasks || []).length;
                 homeworkList.push(pkg);
               }
 
@@ -145,10 +157,14 @@ export const sparxHandlers = {
             }
           } catch (err) {
             warn('[sparx] task list failed: ' + err.message);
-            patchPlatform(interaction.user.id, 'sparx', { tasks: [] });
+            patchPlatform(interaction.user.id, 'sparx', {
+              tasks: []
+            });
           }
 
-          const panel = await buildPanel({ interaction: interaction });
+          const panel = await buildPanel({
+            interaction: interaction
+          });
           await interaction.editReply({
             embeds: [panel.embed],
             components: panel.components
@@ -159,7 +175,9 @@ export const sparxHandlers = {
             .setColor(0xed4245)
             .setAuthor({ name: 'Vobo AI · Sparx' })
             .setDescription('❌ Login failed: ' + err.message);
-          await interaction.editReply({ embeds: [embed] }).catch(() => {});
+          await interaction
+            .editReply({ embeds: [embed] })
+            .catch(() => {});
         }
       }
     });
@@ -185,7 +203,7 @@ export const sparxHandlers = {
       });
     }
     patchPlatform(interaction.user.id, 'sparx', {
-      waits: { min, max }
+      waits: { min: min, max: max }
     });
     await interaction.deferUpdate();
     const panel = await buildPanel({ interaction: interaction });
@@ -197,7 +215,9 @@ export const sparxHandlers = {
 
   async 'sparx:settings'(interaction) {
     return interaction.showModal(
-      buildSparxSettingsModal(getPlatform(interaction.user.id, 'sparx'))
+      buildSparxSettingsModal(
+        getPlatform(interaction.user.id, 'sparx')
+      )
     );
   },
 
@@ -218,7 +238,7 @@ export const sparxHandlers = {
     }
 
     patchPlatform(interaction.user.id, 'sparx', {
-      waits: { min, max },
+      waits: { min: min, max: max },
       model: model
     });
     await interaction.deferUpdate();
@@ -242,12 +262,27 @@ export const sparxHandlers = {
     });
   },
 
+  async 'sparx:cancel'(interaction) {
+    const userId = interaction.user.id;
+    const session = getPlatform(userId, 'sparx');
+    if (session && session.activeSignal) {
+      session.activeSignal.cancelled = true;
+    }
+    await interaction
+      .reply({
+        flags: MessageFlags.Ephemeral,
+        content:
+          'Cancel signal sent. Run will stop at the next safe point.'
+      })
+      .catch(() => {});
+  },
+
   async 'sparx:start'(interaction) {
     const userId = interaction.user.id;
     const session = getPlatform(userId, 'sparx');
     const accent = accentFor(userId);
 
-    if (!session?.jwt) {
+    if (!session || !session.jwt) {
       return interaction.reply({
         flags: MessageFlags.Ephemeral,
         content: 'Session expired. Re-login.'
@@ -280,15 +315,27 @@ export const sparxHandlers = {
     });
 
     let progressMsg;
+    const cancelRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('sparx:cancel')
+        .setLabel('Cancel')
+        .setStyle(ButtonStyle.Danger)
+    );
+
     try {
       const dmChannel = await interaction.user.createDM();
       const dmEmbed = new EmbedBuilder()
         .setColor(accent)
         .setAuthor({ name: 'Vobo AI · Sparx' })
         .setDescription('⏳ Waiting for queue slot…');
-      progressMsg = await dmChannel.send({ embeds: [dmEmbed] });
-    } catch (err) {
-      return interaction.editReply({ content: 'Could not open DMs.' });
+      progressMsg = await dmChannel.send({
+        embeds: [dmEmbed],
+        components: [cancelRow]
+      });
+    } catch (_) {
+      return interaction.editReply({
+        content: 'Could not open DMs.'
+      });
     }
 
     const signal = { cancelled: false };
@@ -309,6 +356,21 @@ export const sparxHandlers = {
             onLog: (txt) => log('[sparx] ' + txt)
           });
 
+          if (summary.cancelled) {
+            const cancelEmbed = new EmbedBuilder()
+              .setColor(0xed4245)
+              .setAuthor({ name: 'Vobo AI · Cancelled' })
+              .setDescription(
+                'Run cancelled.\nCorrect so far: ' +
+                  (summary.totalCorrect || 0)
+              );
+            await progressMsg.edit({
+              embeds: [cancelEmbed],
+              components: []
+            });
+            return;
+          }
+
           if (summary.success) {
             const finalEmbed = new EmbedBuilder()
               .setColor(accent)
@@ -317,28 +379,41 @@ export const sparxHandlers = {
                 'Finished all tasks in the homework!\nTotal correct: ' +
                   summary.totalCorrect
               );
-            await progressMsg.edit({ embeds: [finalEmbed] });
+            await progressMsg.edit({
+              embeds: [finalEmbed],
+              components: []
+            });
           } else {
             const failLines =
               (summary.failedTasks || [])
-                .map((t) => `• **${t.title}** — ${t.error}`)
+                .map((t) => '• **' + t.title + '** — ' + t.error)
                 .join('\n') || '• (no tasks ran)';
             const partialEmbed = new EmbedBuilder()
               .setColor(0xed4245)
               .setAuthor({ name: 'Vobo AI · Homework incomplete' })
               .setDescription(
-                `Some tasks did not complete.\n**Correct so far**: ${summary.totalCorrect}\n` +
-                  `**Questions completed**: ${summary.questionsCompleted}\n\n` +
-                  `**Failures**\n${failLines}`
+                'Some tasks did not complete.\n**Correct so far**: ' +
+                  summary.totalCorrect +
+                  '\n' +
+                  '**Questions completed**: ' +
+                  summary.questionsCompleted +
+                  '\n\n' +
+                  '**Failures**\n' +
+                  failLines
               );
-            await progressMsg.edit({ embeds: [partialEmbed] });
+            await progressMsg.edit({
+              embeds: [partialEmbed],
+              components: []
+            });
           }
         } catch (e) {
           log('[sparx] FATAL: ' + e.message);
           const errEmbed = new EmbedBuilder()
             .setColor(0xed4245)
             .setDescription('Run failed: ' + e.message);
-          await progressMsg.edit({ embeds: [errEmbed] }).catch(() => {});
+          await progressMsg
+            .edit({ embeds: [errEmbed], components: [] })
+            .catch(() => {});
         }
       }
     });
