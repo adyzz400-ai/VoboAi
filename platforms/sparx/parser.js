@@ -2,7 +2,7 @@
 
 function readVarint(buf, pos) {
   let result = 0n, shift = 0n, byte;
-  do { byte = buf[pos++]; result |= BigInt(byte & 0x7f) << shift; shift += 7n; } while (byte & 0x80);
+  do { byte = buf[pos++]; result |= BigInt(byte & 0x7f) << shift; shift += 7n; if (shift > 70n) throw new Error('varint too long'); } while (byte & 0x80);
   return { value: result, pos };
 }
 
@@ -46,8 +46,6 @@ function extractTasksFromBytes(pkgBytes) {
   const seenTasks = new Set();
   const pm = byTag(pkgBytes, 0, pkgBytes.length);
   
-  const pkgStr = pkgBytes.toString('utf8');
-  
   for (const tf of pm.get(11) || []) {
     const tBytes = sub(pkgBytes, tf);
     const tm = byTag(tBytes, 0, tBytes.length);
@@ -61,15 +59,14 @@ function extractTasksFromBytes(pkgBytes) {
 
     const taskTitle = ((tm.get(2) || [])[0] && str(tBytes, (tm.get(2) || [])[0])) || 'Task';
     
-    // Calculate accuracy roughly by counting lastCorrect in items
+    // Real accuracy: count items with lastCorrect
     const tStr = tBytes.toString('utf8');
     const totalItems = (tStr.match(/items\//g) || []).length || 1;
     const completedItems = (tStr.match(/lastCorrect/g) || []).length;
     const accuracy = Math.round((completedItems / totalItems) * 100) + '%';
 
     tasks.push({
-      taskId,
-      title: taskTitle,
+      taskId, title: taskTitle,
       isFlashcards: /flash\s*cards?/i.test(taskTitle),
       isTimesTables: /times\s*tables/i.test(taskTitle),
       hasBookworkCheck: !/flash\s*cards?/i.test(taskTitle) && !/times\s*tables/i.test(taskTitle),
@@ -80,30 +77,23 @@ function extractTasksFromBytes(pkgBytes) {
   if (tasks.length === 0) {
     const re = /tasks\/([0-9a-f-]{36})/gi;
     let m, i = 1;
-    while ((m = re.exec(pkgStr)) !== null) {
+    while ((m = re.exec(pkgBytes.toString('utf8'))) !== null) {
       const id = m[1].toLowerCase();
       if (seenTasks.has(id)) continue;
       seenTasks.add(id);
-      const win = pkgStr.slice(Math.max(0, m.index - 80), m.index + 80);
-      let taskTitle = 'Task ' + i;
-      let isTimesTables = false, isFlashcards = false;
+      const win = pkgBytes.toString('utf8').slice(Math.max(0, m.index - 80), m.index + 80);
+      let taskTitle = 'Task ' + i, isTimesTables = false, isFlashcards = false;
       if (/times\s*tables/i.test(win)) { taskTitle = 'Times Tables'; isTimesTables = true; }
       else if (/flash\s*cards?/i.test(win)) { taskTitle = 'Flashcards'; isFlashcards = true; }
-      tasks.push({
-        taskId: id, title: taskTitle, isFlashcards, isTimesTables,
-        hasBookworkCheck: !isFlashcards && !isTimesTables, accuracy: '0%'
-      });
+      tasks.push({ taskId: id, title: taskTitle, isFlashcards, isTimesTables, hasBookworkCheck: !isFlashcards && !isTimesTables, accuracy: '0%' });
       i++;
     }
   }
 
-  // Calculate package accuracy
+  // Package accuracy
   let totalCompleted = 0;
-  let totalTasks = tasks.length || 1;
-  tasks.forEach(t => {
-    totalCompleted += parseInt(t.accuracy) || 0;
-  });
-  const pkgAccuracy = Math.round(totalCompleted / totalTasks) + '%';
+  tasks.forEach(t => { totalCompleted += parseInt(t.accuracy) || 0; });
+  const pkgAccuracy = tasks.length > 0 ? Math.round(totalCompleted / tasks.length) + '%' : '0%';
 
   return { tasks, accuracy: pkgAccuracy };
 }
@@ -154,6 +144,7 @@ export function parseSparxQuestion(buffer) {
   const prompt = promptParts.join(' ').replace(/\s+/g, ' ').trim();
 
   if (textFields.length > 0) {
+    // It's a multi-part question (1a, 1b). Return all fields in order.
     return { prompt, choices: [], textFields, image: imageUrl, activityId, type: 'text' };
   }
   if (slots.length > 0) {
@@ -193,20 +184,17 @@ export function parseGetPackage(buffer) {
     if (t) title = t.replace(/^[^A-Za-z0-9]+/, '').trim() || 'Homework';
   }
 
-  // REAL DUE DATE: Look in tag 6/8 for a nested timestamp in seconds
+  // REAL DUE DATE: nested timestamp in tag 6 (seconds)
   let dueDateMs = null;
-  for (const tag of [6, 8]) {
-    for (const field of pm.get(tag) || []) {
-      if (field.wt === 2) {
-        const nested = byTag(pkgBytes, field.payloadStart, field.payloadEnd);
-        const secField = (nested.get(1) || [])[0];
-        if (secField && secField.wt === 0) {
-          const sec = Number(readVarint(pkgBytes, secField.payloadStart).value);
-          if (sec > 1700000000 && sec < 2000000000) { dueDateMs = sec * 1000; break; }
-        }
+  for (const field of pm.get(6) || []) {
+    if (field.wt === 2) {
+      const nested = byTag(pkgBytes, field.payloadStart, field.payloadEnd);
+      const secField = (nested.get(1) || [])[0];
+      if (secField && secField.wt === 0) {
+        const sec = Number(readVarint(pkgBytes, secField.payloadStart).value);
+        if (sec > 1700000000 && sec < 2000000000) { dueDateMs = sec * 1000; break; }
       }
     }
-    if (dueDateMs) break;
   }
   const dueDate = dueDateMs ? new Date(dueDateMs).toISOString() : null;
 
