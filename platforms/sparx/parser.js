@@ -169,6 +169,10 @@ export function parseSparxQuestion(buffer) {
   const slots = [];
   let imageUrl = null;
 
+  // Aggressive image fallback - sometimes the JSON layout uses 'img', 'image', or has the URL deep inside
+  const imgMatch = s.match(/"src"\s*:\s*"([^"]+)"/) || s.match(/https?:\/\/[^"']+\.(png|jpg|jpeg|gif|svg)/i);
+  if (imgMatch) imageUrl = imgMatch[1] || imgMatch[0];
+
   function walk(node) {
     if (!node || typeof node !== 'object') return;
     if (Array.isArray(node)) {
@@ -179,7 +183,7 @@ export function parseSparxQuestion(buffer) {
       promptParts.push(node.text);
       return;
     }
-    if (node.element === 'image') {
+    if (node.element === 'image' || node.element === 'img') {
       if (typeof node.src === 'string') imageUrl = node.src;
       else if (node.content && node.content[0] && typeof node.content[0].src === 'string') imageUrl = node.content[0].src;
       return;
@@ -287,33 +291,8 @@ function collectPackage(buf, f, out, seen) {
     }
   }
 
-  let dueDateMs = null;
-  for (const tag of [6, 7, 8, 9, 10, 12, 14, 2]) {
-    for (const field of pm.get(tag) || []) {
-      let n = null;
-      if (field.wt === 2) {
-        const nested = byTag(pkgBytes, field.payloadStart, field.payloadEnd);
-        const sec = nested.get(1)?.[0];
-        if (sec && sec.wt === 0) {
-          n = Number(readVarint(pkgBytes, sec.payloadStart).value);
-        }
-      } else if (field.wt === 0) {
-        n = Number(readVarint(pkgBytes, field.payloadStart).value);
-      }
-      
-      if (n) {
-        if (n > 1500000000 && n < 4000000000) {
-          dueDateMs = n * 1000;
-          break;
-        } else if (n > 1500000000000 && n < 4000000000000) {
-          dueDateMs = n;
-          break;
-        }
-      }
-    }
-    if (dueDateMs) break;
-  }
-  const dueDate = dueDateMs ? new Date(dueDateMs).toISOString() : null;
+  // Fake due dates removed. Setting to null.
+  const dueDate = null;
 
   const tasks = extractTasksFromBytes(pkgBytes);
 
@@ -367,31 +346,6 @@ export function parseGetPackage(buffer) {
   }
   const raw = unframe(buffer);
 
-  try {
-    console.log(
-      'GETPKG head:',
-      raw
-        .subarray(0, 80)
-        .toString('utf8')
-        .replace(/[^\x20-\x7e]/g, '.')
-    );
-    const outer = byTag(raw, 0, raw.length);
-    for (const [tag, fs] of outer) {
-      for (const f of fs) {
-        console.log(
-          'GETPKG TOP tag=' +
-            tag +
-            ' wt=' +
-            f.wt +
-            ' len=' +
-            (f.payloadEnd - f.payloadStart)
-        );
-      }
-    }
-  } catch (e) {
-    console.log('GETPKG debug failed:', e.message);
-  }
-
   let pkgBytes = null;
   try {
     const top = byTag(raw, 0, raw.length);
@@ -433,33 +387,8 @@ export function parseGetPackage(buffer) {
     }
   }
 
-  let dueDateMs = null;
-  for (const tag of [6, 7, 8, 9, 10, 12, 14, 2]) {
-    for (const field of pm.get(tag) || []) {
-      let n = null;
-      if (field.wt === 2) {
-        const nested = byTag(pkgBytes, field.payloadStart, field.payloadEnd);
-        const sec = nested.get(1)?.[0];
-        if (sec && sec.wt === 0) {
-          n = Number(readVarint(pkgBytes, sec.payloadStart).value);
-        }
-      } else if (field.wt === 0) {
-        n = Number(readVarint(pkgBytes, field.payloadStart).value);
-      }
-      
-      if (n) {
-        if (n > 1500000000 && n < 4000000000) {
-          dueDateMs = n * 1000;
-          break;
-        } else if (n > 1500000000000 && n < 4000000000000) {
-          dueDateMs = n;
-          break;
-        }
-      }
-    }
-    if (dueDateMs) break;
-  }
-  const dueDate = dueDateMs ? new Date(dueDateMs).toISOString() : null;
+  // Fake due dates removed. Setting to null.
+  const dueDate = null;
 
   const tasks = extractTasksFromBytes(pkgBytes);
 
