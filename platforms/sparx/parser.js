@@ -167,6 +167,7 @@ export function parseSparxQuestion(buffer) {
   const promptParts = [];
   const choices = [];
   const slots = [];
+  let imageUrl = null; // Added for image extraction
 
   function walk(node) {
     if (!node || typeof node !== 'object') return;
@@ -176,6 +177,12 @@ export function parseSparxQuestion(buffer) {
     }
     if (node.element === 'text' && typeof node.text === 'string') {
       promptParts.push(node.text);
+      return;
+    }
+    if (node.element === 'image') {
+      // Extract the image source. It's typically in `src` or `content[0].src`.
+      if (typeof node.src === 'string') imageUrl = node.src;
+      else if (node.content && node.content[0] && typeof node.content[0].src === 'string') imageUrl = node.content[0].src;
       return;
     }
     if (node.element === 'card' || node.element === 'choice') {
@@ -217,6 +224,7 @@ export function parseSparxQuestion(buffer) {
         ref: ref,
         kind: numFields.length > 0 ? 'number' : 'text'
       },
+      image: imageUrl, // Passed to autocompleter
       activityId: activityId,
       type: 'text'
     };
@@ -226,6 +234,7 @@ export function parseSparxQuestion(buffer) {
       prompt: prompt,
       choices: choices,
       slots: slots,
+      image: imageUrl, // Passed to autocompleter
       activityId: activityId,
       type: 'slot'
     };
@@ -233,6 +242,7 @@ export function parseSparxQuestion(buffer) {
   return {
     prompt: prompt,
     choices: choices,
+    image: imageUrl, // Passed to autocompleter
     activityId: activityId,
     type: 'multiple'
   };
