@@ -182,7 +182,7 @@ export async function runSparxPackage({
               type === 'text' ? 'short_answer' : 'multiple_choice',
             prompt: cleanPrompt,
             choices: cleanChoices,
-            image: null,
+            image: parsed.image || null, // <--- PASSED IMAGE HERE
             unit: null
           },
           session
