@@ -21,7 +21,7 @@ import { queue } from '../../queue/index.js';
 import { Task } from '../../queue/task.js';
 import { config } from '../../utils/config.js';
 import { SparxClient } from './client.js';
-import { parseHomeworkList } from './parser.js';
+import { parseHomeworkList, parseGetPackage } from './parser.js';
 
 function accentFor(userId) {
   return parseInt(getTheme(userId).replace('#', ''), 16) || 0x0a78ff;
@@ -109,14 +109,30 @@ export const sparxHandlers = {
               warn('[sparx] ListStudentPackages returned non-buffer');
               patchPlatform(interaction.user.id, 'sparx', { tasks: [] });
             } else {
-              log(
-                '[sparx] list buffer bytes=' + listBuffer.length
-              );
-              const homeworkList = parseHomeworkList(listBuffer);
-              const totalTasks = homeworkList.reduce(
-                (n, p) => n + (p.tasks ? p.tasks.length : 0),
-                0
-              );
+              log('[sparx] list buffer bytes=' + listBuffer.length);
+              const baseList = parseHomeworkList(listBuffer);
+
+              // Enrich each package with its real task tree from GetPackage
+              const homeworkList = [];
+              let totalTasks = 0;
+              for (const pkg of baseList) {
+                try {
+                  const pkgBuffer = await client.getPackage(pkg.packageId);
+                  const detailed = parseGetPackage(pkgBuffer);
+                  if (detailed) {
+                    pkg.tasks = detailed.tasks;
+                    pkg.dueDate = detailed.dueDate || pkg.dueDate;
+                    pkg.title = detailed.title || pkg.title;
+                  }
+                } catch (err) {
+                  warn(
+                    `[sparx] GetPackage ${pkg.packageId} failed: ${err.message}`
+                  );
+                }
+                totalTasks += pkg.tasks.length;
+                homeworkList.push(pkg);
+              }
+
               log(
                 '[sparx] packages=' +
                   homeworkList.length +
@@ -293,15 +309,30 @@ export const sparxHandlers = {
             onLog: (txt) => log('[sparx] ' + txt)
           });
 
-          const finalEmbed = new EmbedBuilder()
-            .setColor(accent)
-            .setAuthor({ name: 'Vobo AI · Homework complete' })
-            .setDescription(
-              'Finished all tasks in the homework!\nTotal correct: ' +
-                summary.totalCorrect
-            );
-
-          await progressMsg.edit({ embeds: [finalEmbed] });
+          if (summary.success) {
+            const finalEmbed = new EmbedBuilder()
+              .setColor(accent)
+              .setAuthor({ name: 'Vobo AI · Homework complete' })
+              .setDescription(
+                'Finished all tasks in the homework!\nTotal correct: ' +
+                  summary.totalCorrect
+              );
+            await progressMsg.edit({ embeds: [finalEmbed] });
+          } else {
+            const failLines =
+              (summary.failedTasks || [])
+                .map((t) => `• **${t.title}** — ${t.error}`)
+                .join('\n') || '• (no tasks ran)';
+            const partialEmbed = new EmbedBuilder()
+              .setColor(0xed4245)
+              .setAuthor({ name: 'Vobo AI · Homework incomplete' })
+              .setDescription(
+                `Some tasks did not complete.\n**Correct so far**: ${summary.totalCorrect}\n` +
+                  `**Questions completed**: ${summary.questionsCompleted}\n\n` +
+                  `**Failures**\n${failLines}`
+              );
+            await progressMsg.edit({ embeds: [partialEmbed] });
+          }
         } catch (e) {
           log('[sparx] FATAL: ' + e.message);
           const errEmbed = new EmbedBuilder()
