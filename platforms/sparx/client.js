@@ -156,7 +156,6 @@ export class SparxClient {
   }
 
   async getPackage(packageId) {
-    // List responses use "-packages/uuid"; GetPackage wants "packages/uuid"
     const path = 'packages/' + packageId;
     const payload = Buffer.concat([
       Buffer.from([0x0a, path.length]),
@@ -219,6 +218,54 @@ export class SparxClient {
       Buffer.from([0x12, inner.length]),
       inner
     ]);
+    return this.request(
+      '/maths/sparx.packageactivity.v1.Activities/ActivityAction',
+      buffer
+    );
+  }
+
+  async submitTextSlot(activityId, slotRef, answerText) {
+    const activityStr = '/activities/' + activityId;
+    const inner = Buffer.concat([
+      Buffer.from([0x0a, slotRef.length]),
+      Buffer.from(slotRef),
+      Buffer.from([0x12, answerText.length]),
+      Buffer.from(answerText)
+    ]);
+    const buffer = Buffer.concat([
+      Buffer.from([0x0a, activityStr.length]),
+      Buffer.from(activityStr),
+      Buffer.from([0x12, inner.length]),
+      inner
+    ]);
+    return this.request(
+      '/maths/sparx.packageactivity.v1.Activities/ActivityAction',
+      buffer
+    );
+  }
+
+  async submitMultiText(activityId, textFields, answers) {
+    const activityStr = '/activities/' + activityId;
+    const innerParts = [];
+    
+    for (let i = 0; i < textFields.length; i++) {
+      const ref = textFields[i].ref;
+      const text = answers[i] || '';
+      
+      const fieldMsg = Buffer.concat([
+        Buffer.from([0x0a, ref.length]), Buffer.from(ref),
+        Buffer.from([0x12, text.length]), Buffer.from(text)
+      ]);
+      // Each answer-part is a field 2 (Answer) message: 12 {len} {msg}
+      innerParts.push(Buffer.from([0x12, fieldMsg.length]), fieldMsg);
+    }
+    
+    const inner = Buffer.concat(innerParts);
+    const buffer = Buffer.concat([
+      Buffer.from([0x0a, activityStr.length]), Buffer.from(activityStr),
+      Buffer.from([0x12, inner.length]), inner
+    ]);
+
     return this.request(
       '/maths/sparx.packageactivity.v1.Activities/ActivityAction',
       buffer
