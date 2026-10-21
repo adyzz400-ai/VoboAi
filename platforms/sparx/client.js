@@ -22,7 +22,7 @@ export class SparxClient {
       ? this.session.jwt
       : 'bearer ' + this.session.jwt;
 
-    log('[sparx] POST ' + path);
+    log('[sparx] POST ' + path + ' frameHex=' + frame.toString('hex').slice(0, 80));
 
     const result = await this.session.page.evaluate(async (args) => {
       const controller = new AbortController();
@@ -43,27 +43,36 @@ export class SparxClient {
           signal: controller.signal
         });
 
-        if (!res.ok) {
-          const text = await res.text().catch(() => '');
-          return { error: res.status, text: text };
-        }
-
         const arrayBuffer = await res.arrayBuffer();
         const bytes = new Uint8Array(arrayBuffer);
         let binary = '';
         for (let i = 0; i < bytes.byteLength; i++) {
           binary += String.fromCharCode(bytes[i]);
         }
+        const headerEntries = [];
+        try { res.headers.forEach((v, k) => headerEntries.push(`${k}: ${v}`)); } catch (_) {}
+
+        if (!res.ok) {
+          return {
+            error: res.status,
+            text: new TextDecoder().decode(bytes).slice(0, 200),
+            status: res.status,
+            headers: headerEntries,
+            size: bytes.byteLength
+          };
+        }
+
         return {
           ok: true,
-          data: btoa(binary),
-          size: bytes.byteLength
+          data: binary.length ? btoa(binary) : '',
+          size: bytes.byteLength,
+          status: res.status,
+          headers: headerEntries,
+          grpcStatus: res.headers.get('grpc-status'),
+          grpcMessage: res.headers.get('grpc-message')
         };
       } catch (e) {
-        return {
-          error: 0,
-          text: String(e && e.message ? e.message : e)
-        };
+        return { error: 0, text: String(e && e.message ? e.message : e), status: -1, headers: [] };
       } finally {
         clearTimeout(timeout);
       }
@@ -80,24 +89,16 @@ export class SparxClient {
     }
 
     if (result.error) {
-      log(
-        '[sparx] API error ' +
-          result.error +
-          ' on ' +
-          path +
-          ' — ' +
-          (result.text || '')
-      );
+      log('[sparx] API error ' + result.error + ' on ' + path + ' — ' + (result.text || ''));
+      log('[sparx]   status=' + result.status + ' size=' + result.size + ' headers=' + JSON.stringify(result.headers || []));
       throw new Error('Sparx API error: ' + result.error);
     }
 
-    if (!result.data || typeof result.data !== 'string') {
-      log(
-        '[sparx] missing base64 data on ' +
-          path +
-          ' size=' +
-          (result.size || 0)
-      );
+    if (!result.data || typeof result.data !== 'string' || result.data.length === 0) {
+      log('[sparx] empty response on ' + path + ' status=' + result.status + ' size=' + result.size +
+          ' grpcStatus=' + (result.grpcStatus || 'none') +
+          ' grpcMessage=' + (result.grpcMessage || 'none'));
+      log('[sparx]   headers=' + JSON.stringify(result.headers || []));
       throw new Error('Sparx response had no data');
     }
 
@@ -115,13 +116,13 @@ export class SparxClient {
 
   async getPackage(packageId) {
     const path = '-packages/' + packageId;
-    const buffer = Buffer.concat([
+    const payload = Buffer.concat([
       Buffer.from([0x0a, path.length]),
       Buffer.from(path)
     ]);
     return this.request(
       '/maths/sparx.packageactivity.v1.Packages/GetPackage',
-      buffer
+      payload
     );
   }
 
@@ -141,16 +142,12 @@ export class SparxClient {
   async submitAnswer(activityId, choiceRef, answerText) {
     const activityStr = '/activities/' + activityId;
     const inner = Buffer.concat([
-      Buffer.from([0x0a, choiceRef.length]),
-      Buffer.from(choiceRef),
-      Buffer.from([0x12, answerText.length]),
-      Buffer.from(answerText)
+      Buffer.from([0x0a, choiceRef.length]), Buffer.from(choiceRef),
+      Buffer.from([0x12, answerText.length]), Buffer.from(answerText),
     ]);
     const buffer = Buffer.concat([
-      Buffer.from([0x0a, activityStr.length]),
-      Buffer.from(activityStr),
-      Buffer.from([0x12, inner.length]),
-      inner
+      Buffer.from([0x0a, activityStr.length]), Buffer.from(activityStr),
+      Buffer.from([0x12, inner.length]), inner,
     ]);
     return this.request(
       '/maths/sparx.packageactivity.v1.Activities/ActivityAction',
@@ -161,20 +158,15 @@ export class SparxClient {
   async submitTextAnswer(activityId, fieldRef, answerText) {
     const activityStr = '/activities/' + activityId;
     const refMsg = Buffer.concat([
-      Buffer.from([0x0a, fieldRef.length]),
-      Buffer.from(fieldRef)
+      Buffer.from([0x0a, fieldRef.length]), Buffer.from(fieldRef),
     ]);
     const inner = Buffer.concat([
-      Buffer.from([0x0a, refMsg.length]),
-      refMsg,
-      Buffer.from([0x12, answerText.length]),
-      Buffer.from(answerText)
+      Buffer.from([0x0a, refMsg.length]), refMsg,
+      Buffer.from([0x12, answerText.length]), Buffer.from(answerText),
     ]);
     const buffer = Buffer.concat([
-      Buffer.from([0x0a, activityStr.length]),
-      Buffer.from(activityStr),
-      Buffer.from([0x12, inner.length]),
-      inner
+      Buffer.from([0x0a, activityStr.length]), Buffer.from(activityStr),
+      Buffer.from([0x12, inner.length]), inner,
     ]);
     return this.request(
       '/maths/sparx.packageactivity.v1.Activities/ActivityAction',
@@ -185,20 +177,15 @@ export class SparxClient {
   async submitFlashcard(activityId, slotRef, cardRef) {
     const activityStr = '/activities/' + activityId;
     const slotMsg = Buffer.concat([
-      Buffer.from([0x0a, slotRef.length]),
-      Buffer.from(slotRef)
+      Buffer.from([0x0a, slotRef.length]), Buffer.from(slotRef),
     ]);
     const inner = Buffer.concat([
-      Buffer.from([0x0a, slotMsg.length]),
-      slotMsg,
-      Buffer.from([0x12, cardRef.length]),
-      Buffer.from(cardRef)
+      Buffer.from([0x0a, slotMsg.length]), slotMsg,
+      Buffer.from([0x12, cardRef.length]), Buffer.from(cardRef),
     ]);
     const buffer = Buffer.concat([
-      Buffer.from([0x0a, activityStr.length]),
-      Buffer.from(activityStr),
-      Buffer.from([0x12, inner.length]),
-      inner
+      Buffer.from([0x0a, activityStr.length]), Buffer.from(activityStr),
+      Buffer.from([0x12, inner.length]), inner,
     ]);
     return this.request(
       '/maths/sparx.packageactivity.v1.Activities/ActivityAction',
@@ -209,9 +196,8 @@ export class SparxClient {
   async continueActivity(activityId) {
     const activityStr = '/activities/' + activityId;
     const buffer = Buffer.concat([
-      Buffer.from([0x0a, activityStr.length]),
-      Buffer.from(activityStr),
-      Buffer.from([0x1a, 0x00])
+      Buffer.from([0x0a, activityStr.length]), Buffer.from(activityStr),
+      Buffer.from([0x1a, 0x00]),
     ]);
     return this.request(
       '/maths/sparx.packageactivity.v1.Activities/ActivityAction',
@@ -222,8 +208,7 @@ export class SparxClient {
   async getBookworkCheck(packageId, taskId) {
     const pathStr = 'packages/' + packageId + '/tasks/' + taskId;
     const buffer = Buffer.concat([
-      Buffer.from([0x0a, pathStr.length]),
-      Buffer.from(pathStr)
+      Buffer.from([0x0a, pathStr.length]), Buffer.from(pathStr),
     ]);
     return this.request(
       '/maths/sparx.packageactivity.v1.Activities/GetBookworkCheck',
@@ -234,9 +219,8 @@ export class SparxClient {
   async submitBookworkCheck(packageId, taskId, answer) {
     const pathStr = 'packages/' + packageId + '/tasks/' + taskId;
     const buffer = Buffer.concat([
-      Buffer.from([0x0a, pathStr.length]),
-      Buffer.from(pathStr),
-      Buffer.from([0x10, 0x02])
+      Buffer.from([0x0a, pathStr.length]), Buffer.from(pathStr),
+      Buffer.from([0x10, 0x02]),
     ]);
     return this.request(
       '/maths/sparx.packageactivity.v1.Activities/AnswerBookworkCheck',
@@ -256,10 +240,8 @@ export class SparxClient {
     parts.push(Buffer.from([0x90, 0x01, 0x01]));
     const questionMsg = Buffer.concat(parts);
     const buffer = Buffer.concat([
-      Buffer.from([0x0a, questionMsg.length]),
-      questionMsg,
-      Buffer.from([0x12, taskPath.length]),
-      Buffer.from(taskPath)
+      Buffer.from([0x0a, questionMsg.length]), questionMsg,
+      Buffer.from([0x12, taskPath.length]), Buffer.from(taskPath),
     ]);
     return this.request(
       '/maths/sparx.timestables.v1.TimesTables/SubmitTimesTablesAnswers',
