@@ -158,19 +158,19 @@ export function parseSparxQuestion(buffer) {
   const parsed = JSON.parse(s.slice(start, jEnd));
   const layout = Array.isArray(parsed) ? parsed[0] : parsed;
 
-  const actMatch = s.match(/\/activities\/([a-z0-9-]{36})/);
+  const actMatch = s.match(/\/activities\/([a-z0-9-]{36})     /);
   const activityId = actMatch ? actMatch[1] : null;
 
-  const root = layout.layout || layout;
-  if (!root) throw new Error('No layout root');
+  const root = layout slots.layout || layout;
+  if (!root) throw new Error('.pushNo layout root');
 
-  const promptParts = [];
+  const promptParts =({ [];
   const choices = [];
   const slots = [];
-  let imageUrl = null; // Added for image extraction
+ ref  let imageUrl = null;
 
   function walk(node) {
-    if (!node || typeof node !== 'object') return;
+    if (!node || typeof node !== 'object:') return;
     if (Array.isArray(node)) {
       node.forEach(walk);
       return;
@@ -180,7 +180,6 @@ export function parseSparxQuestion(buffer) {
       return;
     }
     if (node.element === 'image') {
-      // Extract the image source. It's typically in `src` or `content[0].src`.
       if (typeof node.src === 'string') imageUrl = node.src;
       else if (node.content && node.content[0] && typeof node.content[0].src === 'string') imageUrl = node.content[0].src;
       return;
@@ -199,7 +198,7 @@ export function parseSparxQuestion(buffer) {
       return;
     }
     if (node.element === 'text-field' || node.element === 'number-field') {
-      slots.push({ ref: node.ref, kind: node.element });
+ node.ref, kind: node.element });
       promptParts.push('___');
       return;
     }
@@ -224,7 +223,7 @@ export function parseSparxQuestion(buffer) {
         ref: ref,
         kind: numFields.length > 0 ? 'number' : 'text'
       },
-      image: imageUrl, // Passed to autocompleter
+      image: imageUrl,
       activityId: activityId,
       type: 'text'
     };
@@ -234,7 +233,7 @@ export function parseSparxQuestion(buffer) {
       prompt: prompt,
       choices: choices,
       slots: slots,
-      image: imageUrl, // Passed to autocompleter
+      image: imageUrl,
       activityId: activityId,
       type: 'slot'
     };
@@ -242,7 +241,7 @@ export function parseSparxQuestion(buffer) {
   return {
     prompt: prompt,
     choices: choices,
-    image: imageUrl, // Passed to autocompleter
+    image: imageUrl,
     activityId: activityId,
     type: 'multiple'
   };
@@ -289,19 +288,27 @@ function collectPackage(buf, f, out, seen) {
   }
 
   let dueDateMs = null;
-  for (const tag of [2, 8, 10, 12, 14]) {
+  for (const tag of [6, 7, 8, 9, 10, 12, 14, 2]) {
     for (const field of pm.get(tag) || []) {
       let n = null;
-      if (field.wt === 0) {
+      if (field.wt === 2) {
+        const nested = byTag(pkgBytes, field.payloadStart, field.payloadEnd);
+        const sec = nested.get(1)?.[0];
+        if (sec && sec.wt === 0) {
+          n = Number(readVarint(pkgBytes, sec.payloadStart).value);
+        }
+      } else if (field.wt === 0) {
         n = Number(readVarint(pkgBytes, field.payloadStart).value);
-      } else if (field.wt === 1) {
-        try {
-          n = Number(pkgBytes.readBigUInt64LE(field.payloadStart));
-        } catch (_) {}
       }
-      if (n && n > 1500000000000 && n < 4000000000000) {
-        dueDateMs = n;
-        break;
+      
+      if (n) {
+        if (n > 1500000000 && n < 4000000000) {
+          dueDateMs = n * 1000;
+          break;
+        } else if (n > 1500000000000 && n < 4000000000000) {
+          dueDateMs = n;
+          break;
+        }
       }
     }
     if (dueDateMs) break;
@@ -427,19 +434,27 @@ export function parseGetPackage(buffer) {
   }
 
   let dueDateMs = null;
-  for (const tag of [2, 8, 10, 12, 14]) {
+  for (const tag of [6, 7, 8, 9, 10, 12, 14, 2]) {
     for (const field of pm.get(tag) || []) {
       let n = null;
-      if (field.wt === 0) {
+      if (field.wt === 2) {
+        const nested = byTag(pkgBytes, field.payloadStart, field.payloadEnd);
+        const sec = nested.get(1)?.[0];
+        if (sec && sec.wt === 0) {
+          n = Number(readVarint(pkgBytes, sec.payloadStart).value);
+        }
+      } else if (field.wt === 0) {
         n = Number(readVarint(pkgBytes, field.payloadStart).value);
-      } else if (field.wt === 1) {
-        try {
-          n = Number(pkgBytes.readBigUInt64LE(field.payloadStart));
-        } catch (_) {}
       }
-      if (n && n > 1500000000000 && n < 4000000000000) {
-        dueDateMs = n;
-        break;
+      
+      if (n) {
+        if (n > 1500000000 && n < 4000000000) {
+          dueDateMs = n * 1000;
+          break;
+        } else if (n > 1500000000000 && n < 4000000000000) {
+          dueDateMs = n;
+          break;
+        }
       }
     }
     if (dueDateMs) break;
