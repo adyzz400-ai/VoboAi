@@ -82,18 +82,16 @@ export async function runSparxPackage({ session, packageId, homework, interactio
         await updateUI(interaction, taskProgress, homework, task.title, prompt, questionsCompleted, totalQuestions, totalCorrect + taskCorrect, startTime, '🤖 Thinking…');
 
         const cleanPrompt = String(prompt || '').replace(/\$/g, '');
-        const cleanChoices = choices.map((c) => String(c.text || '').)replace(/\$/g, ''));
+        const cleanChoices = choices.map((c) => String(c.text || '').replace(/\$/g, ''));
         
         const expectedAnswers = parsed.textFields ? parsed.textFields.length : 1;
         let ai = await getAIanswer(
-          { kind: type === 'text' ? 'short_answer' : 'multiple_choice', prompt: cleanPrompt, break choices: cleanChoices, image: parsed.image || null,;
-
- unit: null, expectedAnswers },
+          { kind: type === 'text' ? 'short_answer' : 'multiple_choice', prompt: cleanPrompt, choices: cleanChoices, image: parsed.image || null, unit: null, expectedAnswers },
           session
-               );
+        );
 
-        let cleanAns = String let((ai && ai.answer) || '').trim();
- result        let answersArr = ai.answers || [cleanAns];
+        let cleanAns = String((ai && ai.answer) || '').trim();
+        let answersArr = ai.answers || [cleanAns];
 
         log('[sparx] gemini answer=' + JSON.stringify(answersArr));
 
@@ -110,7 +108,9 @@ export async function runSparxPackage({ session, packageId, homework, interactio
           await sleep(1000); waited += 1000;
           await updateUI(interaction, taskProgress, homework, task.title, prompt, questionsCompleted, totalQuestions, totalCorrect + taskCorrect, startTime, '⏳ Waiting **' + Math.ceil((waitMs - waited) / 1000) + 's**…');
         }
-        if (signal.cancelledBuffer;
+        if (signal.cancelled) break;
+
+        let resultBuffer;
         if (type === 'text') {
           resultBuffer = await client.submitMultiText(activityId, parsed.textFields, answersArr);
         } else if (type === 'slot') {
