@@ -1,14 +1,8 @@
 // language: JavaScript (ESM), file: platforms/sparx/autocompleter.js
-import {
-  EmbedBuilder,
-  AttachmentBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle
-} from 'discord.js';
+import { EmbedBuilder, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { log } from '../../utils/logger.js';
 import { sleep } from '../../utils/formatTime.js';
-import { getAIanswer } from '../educake/getAIanswer.js';
+import { getAIanswer } from '../educake/getAIAnswer.js';
 import { parseSparxQuestion, parseBookworkCode } from './parser.js';
 import { SparxClient } from './client.js';
 import { renderMultiBar } from '../../utils/progressBar.js';
@@ -34,8 +28,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
   });
 
   const failedTasks = [];
-  let totalCorrect = 0;
-  let questionsCompleted = 0;
+  let totalCorrect = 0, questionsCompleted = 0;
   const totalQuestions = homework.tasks.reduce((sum, t) => sum + (t.isTimesTables ? 30 : 10), 0);
   const startTime = Date.now();
   const { minMs, maxMs } = waitWindow(session);
@@ -46,8 +39,8 @@ export async function runSparxPackage({ session, packageId, homework, interactio
     onLog('Starting ' + task.title + '...');
 
     if (task.isTimesTables) {
-      let ttCorrect = 0, totalTT = 30;
-      for (let q = 0; q < totalTT; q++) {
+      let ttCorrect = 0;
+      for (let q = 0; q < 30; q++) {
         if (signal.cancelled) break;
         const a = Math.floor(Math.random() * 12) + 1, b = Math.floor(Math.random() * 12) + 1;
         const promptStr = a + 'x' + b + '=?', answerStr = String(a * b);
@@ -57,7 +50,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
         try { await client.submitTimesTablesOne(packageId, task.taskId, promptStr, answerStr); ttCorrect++; } catch (e) {}
         await sleep(800 + Math.random() * 500);
       }
-      taskProgress[task.taskId].filled = totalTT;
+      taskProgress[task.taskId].filled = 30;
       totalCorrect += ttCorrect;
       continue;
     }
@@ -81,24 +74,34 @@ export async function runSparxPackage({ session, packageId, homework, interactio
         questionsCompleted = homework.tasks.slice(0, i).reduce((s, t) => s + (t.isTimesTables ? 30 : 10), 0) + (item - 1);
         await updateUI(interaction, taskProgress, homework, task.title, prompt, questionsCompleted, totalQuestions, totalCorrect + taskCorrect, startTime, '🤖 Thinking…');
 
+        // Signal ready to server
+        await client.readyQuestion(activityId).catch(() => {});
+
         const cleanPrompt = String(prompt || '').replace(/\$/g, '');
         const cleanChoices = choices.map((c) => String(c.text || '').replace(/\$/g, ''));
         
-        const expectedAnswers = parsed.textFields ? parsed.textFields.length : 1;
-        let ai = await getAIanswer(
-          { kind: type === 'text' ? 'short_answer' : 'multiple_choice', prompt: cleanPrompt, choices: cleanChoices, image: parsed.image || null, unit: null, expectedAnswers },
+        const ai = await getAIanswer(
+          { kind: type === 'multiple' ? 'multiple_choice' : 'short_answer', prompt: cleanPrompt, choices: cleanChoices, image: parsed.image || null, fields: parsed.numberFields || parsed.textFields },
           session
         );
 
-        let cleanAns = String((ai && ai.answer) || '').trim();
-        let answersArr = ai.answers || [cleanAns];
-
-        log('[sparx] gemini answer=' + JSON.stringify(answersArr));
-
-        let chosen = null;
-        if (choices.length > 0) {
-          const target = cleanAns.replace(/\s+/g, '').toLowerCase();
-          chosen = choices.find((c) => String(c.text || '').replace(/\s+/g, '').toLowerCase() === target) || choices[0];
+        let components = [];
+        if (type === 'number') {
+          if (!ai || !ai.answers) throw new Error('AI failed to return fields');
+          components = parsed.numberFields.map(f => ({ key: f.ref, value: String(ai.answers[f.ref] || '0') }));
+        } else if (type === 'text') {
+          if (!ai || !ai.answers) throw new Error('AI failed to return text fields');
+          components = parsed.textFields.map(f => ({ key: f.ref, value: String(ai.answers[f.ref] || '') }));
+        } else if (type === 'slot') {
+          const slot = parsed.slots[0];
+          const card = choices.find(c => c.text === ai.answer) || choices[0];
+          const slotMsg = Buffer.concat([Buffer.from([0x0a, slot.ref.length]), Buffer.from(slot.ref)]);
+          const inner = Buffer.concat([Buffer.from([0x0a, slotMsg.length]), slotMsg, Buffer.from([0x12, card.ref.length]), Buffer.from(card.ref)]);
+          buffer = await client.request('/maths/sparx.packageactivity.v1.Activities/ActivityAction', Buffer.concat([Buffer.from([0x0a, activityId.length+11]), Buffer.from('/activities/'+activityId), Buffer.from([0x12, inner.length]), inner]));
+          taskCorrect++; item++; continue;
+        } else {
+          const chosen = choices.find(c => c.text === ai.answer) || choices[0];
+          components = [{ key: chosen.ref, value: chosen.text }];
         }
 
         const waitMs = minMs + Math.random() * (maxMs - minMs);
@@ -110,24 +113,8 @@ export async function runSparxPackage({ session, packageId, homework, interactio
         }
         if (signal.cancelled) break;
 
-        let resultBuffer;
-        if (type === 'text') {
-          resultBuffer = await client.submitMultiText(activityId, parsed.textFields, answersArr);
-        } else if (type === 'slot') {
-          const slot = parsed.slots[0];
-          if (slot && !chosen && choices.length === 0) {
-            resultBuffer = await client.submitTextSlot(activityId, slot.ref, cleanAns);
-          } else if (slot && chosen) {
-            resultBuffer = await client.submitFlashcard(activityId, slot.ref, chosen.ref);
-          } else {
-            throw new Error('Invalid slot data');
-          }
-        } else {
-          if (!chosen) throw new Error('No choices');
-          resultBuffer = await client.submitAnswer(activityId, chosen.ref, chosen.text);
-        }
-
-        buffer = resultBuffer;
+        buffer = await client.submitQuestion(activityId, components);
+        
         if (buffer.length > 5000) {
           onLog('Wrong answer on ' + task.title + '. Continuing...');
           try {
