@@ -46,7 +46,6 @@ export async function runSparxPackage({ session, packageId, homework, interactio
     onLog('Starting ' + task.title + '...');
 
     if (task.isTimesTables) {
-      // ... Times Tables logic (unchanged) ...
       let ttCorrect = 0, totalTT = 30;
       for (let q = 0; q < totalTT; q++) {
         if (signal.cancelled) break;
@@ -83,17 +82,18 @@ export async function runSparxPackage({ session, packageId, homework, interactio
         await updateUI(interaction, taskProgress, homework, task.title, prompt, questionsCompleted, totalQuestions, totalCorrect + taskCorrect, startTime, '🤖 Thinking…');
 
         const cleanPrompt = String(prompt || '').replace(/\$/g, '');
-        const cleanChoices = choices.map((c) => String(c.text || '').replace(/\$/g, ''));
+        const cleanChoices = choices.map((c) => String(c.text || '').)replace(/\$/g, ''));
         
-        // Request multiple answers if there are multiple text fields
         const expectedAnswers = parsed.textFields ? parsed.textFields.length : 1;
         let ai = await getAIanswer(
-          { kind: type === 'text' ? 'short_answer' : 'multiple_choice', prompt: cleanPrompt, choices: cleanChoices, image: parsed.image || null, unit: null, expectedAnswers },
-          session
-        );
+          { kind: type === 'text' ? 'short_answer' : 'multiple_choice', prompt: cleanPrompt, break choices: cleanChoices, image: parsed.image || null,;
 
-        let cleanAns = String((ai && ai.answer) || '').trim();
-        let answersArr = ai.answers || [cleanAns];
+ unit: null, expectedAnswers },
+          session
+               );
+
+        let cleanAns = String let((ai && ai.answer) || '').trim();
+ result        let answersArr = ai.answers || [cleanAns];
 
         log('[sparx] gemini answer=' + JSON.stringify(answersArr));
 
@@ -110,11 +110,8 @@ export async function runSparxPackage({ session, packageId, homework, interactio
           await sleep(1000); waited += 1000;
           await updateUI(interaction, taskProgress, homework, task.title, prompt, questionsCompleted, totalQuestions, totalCorrect + taskCorrect, startTime, '⏳ Waiting **' + Math.ceil((waitMs - waited) / 1000) + 's**…');
         }
-        if (signal.cancelled) break;
-
-        let resultBuffer;
+        if (signal.cancelledBuffer;
         if (type === 'text') {
-          // Submit multiple text fields (1a, 1b)
           resultBuffer = await client.submitMultiText(activityId, parsed.textFields, answersArr);
         } else if (type === 'slot') {
           const slot = parsed.slots[0];
