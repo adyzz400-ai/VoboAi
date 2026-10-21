@@ -63,9 +63,11 @@ function getXpData(pm, pkgBytes) {
   const xpFields = pm.get(6) || [];
   if (xpFields.length > 0) {
     const nested = byTag(pkgBytes, xpFields[0].payloadStart, xpFields[0].payloadEnd);
+    console.log(`[sparx] XP field 6 nested tags: ${Array.from(nested.keys()).join(',')}`);
     const f1 = (nested.get(1) || [])[0];
     if (f1) {
       const inner = byTag(pkgBytes, f1.payloadStart, f1.payloadEnd);
+      console.log(`[sparx] XP field 6 -> 1 nested tags: ${Array.from(inner.keys()).join(',')}`);
       for (const t of inner.get(3) || []) {
         const u = byTag(pkgBytes, t.payloadStart, t.payloadEnd);
         let k = null, v = null;
@@ -75,8 +77,10 @@ function getXpData(pm, pkgBytes) {
             if (tag === 2 && f.wt === 1) v = pkgBytes.readDoubleLE(f.payloadStart);
           }
         }
-        if (k === 'C') doneXp = v;
-        if (k === 'T') targetXp = v;
+        console.log(`[sparx] XP map entry: key="${k}", value=${v}`);
+        // Broadened matching to catch API variations beyond literal 'C' and 'T'
+        if (k === 'C' || k === 'completed' || k === 'done' || k === 'earned') doneXp = v;
+        if (k === 'T' || k === 'target' || k === 'total' || k === 'max') targetXp = v;
       }
     }
   }
@@ -88,72 +92,101 @@ function extractTasksFromBytes(pkgBytes) {
   const seen = new Set();
   const pm = byTag(pkgBytes, 0, pkgBytes.length);
 
-  const tag11s = pm.get(11) || [];
-  if (tag11s.length > 0) {
-    const first = tag11s[0];
-    const inner = byTag(pkgBytes, first.payloadStart, first.payloadEnd);
-    console.log(`[sparx] Task tag 11 inner tags: ${Array.from(inner.keys()).join(',')}`);
-    // Log the string values of each inner tag to find the task ID
-    for (const [tag, fs] of inner) {
-      const val = str(pkgBytes, fs[0]);
-      if (val.length > 0 && !/[\x00-\x08]/.test(val)) {
-        console.log(`[sparx] Task tag 11 tag${tag} string: "${val.slice(0, 50)}"`);
-      }
-    }
-  }
+  // Check multiple candidate tags; 11 is primary, but 10/12/8 are fallbacks if structure shifts
+  const candidateTags = [11, 10, 12, 8];
+  
+  for (const tagNum of candidateTags) {
+    const tagFields = pm.get(tagNum) || [];
+    if (tagFields.length === 0) continue;
 
-  for (const tf of tag11s) {
-    const tBytes = sub(pkgBytes, tf);
-    const tm = byTag(tBytes, 0, tBytes.length);
-    
-    // Find the path string in any of the fields 1, 2, 3, etc.
-    let tPath = null;
-    for (const [tag, fs] of tm) {
-      for (const f of fs) {
-        if (f.wt === 2) {
-          const val = str(tBytes, f);
-          if (val.includes('tasks/') || val.match(/^[0-9a-f-]{36}$/i)) {
-            tPath = val;
-            break;
+    for (const tf of tagFields) {
+      const tBytes = sub(pkgBytes, tf);
+      
+      // Recursive search for task path (UUID or 'tasks/' string) at any nesting depth
+      let tPath = null;
+      function findTaskPath(buf, start, end) {
+        for (const f of fields(buf, start, end)) {
+          if (f.wt === 2) {
+            const val = str(buf, f);
+            if (val.includes('tasks/') || val.match(/^[0-9a-f-]{36}$/i)) {
+              return val;
+            }
+            const res = findTaskPath(buf, f.payloadStart, f.payloadEnd);
+            if (res) return res;
           }
         }
+        return null;
       }
-      if (tPath) break;
-    }
-    
-    if (!tPath) continue;
-    const tMatch = tPath.match(/tasks\/([0-9a-f-]{36})/i) || tPath.match(/([0-9a-f-]{36})/i);
-    if (!tMatch) continue;
-    const taskId = tMatch[1].toLowerCase();
-    if (seen.has(taskId)) continue;
-    seen.add(taskId);
+      
+      tPath = findTaskPath(tBytes, 0, tBytes.length);
+      
+      if (!tPath) {
+        // Diagnostic dump: if the primary tag yields nothing, print every string inside it
+        if (tagNum === 11 && tf === tagFields[0]) {
+          console.log(`[sparx] DEBUG: No task path found in tag ${tagNum}. Dumping nested strings:`);
+          function dumpStrings(buf, start, end, depth = 0) {
+            for (const f of fields(buf, start, end)) {
+              if (f.wt === 2) {
+                const val = str(buf, f);
+                if (val.length > 0 && val.length < 150 && !/[\x00-\x08]/.test(val)) {
+                  console.log(`[sparx]   ${' '.repeat(depth)}tag${f.tag}: "${val}"`);
+                }
+                dumpStrings(buf, f.payloadStart, f.payloadEnd, depth + 1);
+              }
+            }
+          }
+          dumpStrings(tBytes, 0, tBytes.length);
+        }
+        continue;
+      }
 
-    // Find the title string
-    let taskTitle = 'Task';
-    for (const [tag, fs] of tm) {
-      for (const f of fs) {
-        if (f.wt === 2) {
-          const val = str(tBytes, f);
-          if (val.startsWith('Task') || val.startsWith('Flashcards') || val.startsWith('Times Tables')) {
-            taskTitle = val;
-            break;
+      const tMatch = tPath.match(/tasks\/([0-9a-f-]{36})/i) || tPath.match(/([0-9a-f-]{36})/i);
+      if (!tMatch) continue;
+      const taskId = tMatch[1].toLowerCase();
+      if (seen.has(taskId)) continue;
+      seen.add(taskId);
+
+      // Recursive title search
+      let taskTitle = 'Task';
+      function findTitle(buf, start, end) {
+        for (const f of fields(buf, start, end)) {
+          if (f.wt === 2) {
+            const val = str(buf, f);
+            if (val.length > 5 && (val.startsWith('Task') || val.startsWith('Flashcards') || val.startsWith('Times Tables') || val.includes('Question') || val.includes('Practice'))) {
+              return val;
+            }
+            const res = findTitle(buf, f.payloadStart, f.payloadEnd);
+            if (res) return res;
           }
         }
+        return null;
       }
+      const foundTitle = findTitle(tBytes, 0, tBytes.length);
+      if (foundTitle) taskTitle = foundTitle;
+
+      // Recursive count search (tags 6 and 7 are common, but we scan all varints)
+      let total = 10, done = 0;
+      function findCounts(buf, start, end) {
+        for (const f of fields(buf, start, end)) {
+          if (f.wt === 0) {
+            const val = Number(readVarint(buf, f.payloadStart).value);
+            if (f.tag === 6) total = val;
+            if (f.tag === 7) done = val;
+          }
+          if (f.wt === 2) findCounts(buf, f.payloadStart, f.payloadEnd);
+        }
+      }
+      findCounts(tBytes, 0, tBytes.length);
+
+      tasks.push({
+        taskId, 
+        title: taskTitle,
+        isFlashcards: /flash\s*cards?/i.test(taskTitle),
+        isTimesTables: /times\s*tables/i.test(taskTitle),
+        hasBookworkCheck: !/flash\s*cards?/i.test(taskTitle) && !/times\s*tables/i.test(taskTitle),
+        accuracy: total > 0 ? Math.round((done / total) * 100) + '%' : '0%'
+      });
     }
-
-    // Find total/done fields (usually 6 and 7, but could be different)
-    let total = 10, done = 0;
-    if (tm.has(6)) total = Number(readVarint(tBytes, tm.get(6)[0].payloadStart).value) || 10;
-    if (tm.has(7)) done = Number(readVarint(tBytes, tm.get(7)[0].payloadStart).value) || 0;
-
-    tasks.push({
-      taskId, title: taskTitle,
-      isFlashcards: /flash\s*cards?/i.test(taskTitle),
-      isTimesTables: /times\s*tables/i.test(taskTitle),
-      hasBookworkCheck: !/flash\s*cards?/i.test(taskTitle) && !/times\s*tables/i.test(taskTitle),
-      accuracy: Math.round((done / total) * 100) + '%'
-    });
   }
   return tasks;
 }
