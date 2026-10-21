@@ -2,7 +2,7 @@
 import { EmbedBuilder, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { log } from '../../utils/logger.js';
 import { sleep } from '../../utils/formatTime.js';
-import { getAIanswer } from '../educake/getAIAnswer.js';
+import { getAIanswer } from '../educake/getAIanswer.js';
 import { parseSparxQuestion, parseBookworkCode } from './parser.js';
 import { SparxClient } from './client.js';
 import { renderMultiBar } from '../../utils/progressBar.js';
