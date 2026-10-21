@@ -8,7 +8,7 @@ import {
 } from 'discord.js';
 import { log } from '../../utils/logger.js';
 import { sleep } from '../../utils/formatTime.js';
-import { getAIanswer } from '../educake/getAIAnswer.js';
+import { getAIanswer } from './getAIAnswer.js';
 import { parseSparxQuestion, parseBookworkCode } from './parser.js';
 import { SparxClient } from './client.js';
 import { renderMultiBar } from '../../utils/progressBar.js';
