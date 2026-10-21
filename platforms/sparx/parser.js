@@ -88,24 +88,65 @@ function extractTasksFromBytes(pkgBytes) {
   const seen = new Set();
   const pm = byTag(pkgBytes, 0, pkgBytes.length);
 
-  // Try field 11
-  for (const tf of pm.get(11) || []) {
+  const tag11s = pm.get(11) || [];
+  if (tag11s.length > 0) {
+    const first = tag11s[0];
+    const inner = byTag(pkgBytes, first.payloadStart, first.payloadEnd);
+    console.log(`[sparx] Task tag 11 inner tags: ${Array.from(inner.keys()).join(',')}`);
+    // Log the string values of each inner tag to find the task ID
+    for (const [tag, fs] of inner) {
+      const val = str(pkgBytes, fs[0]);
+      if (val.length > 0 && !/[\x00-\x08]/.test(val)) {
+        console.log(`[sparx] Task tag 11 tag${tag} string: "${val.slice(0, 50)}"`);
+      }
+    }
+  }
+
+  for (const tf of tag11s) {
     const tBytes = sub(pkgBytes, tf);
     const tm = byTag(tBytes, 0, tBytes.length);
-    const tPath = (tm.get(1) || [])[0];
+    
+    // Find the path string in any of the fields 1, 2, 3, etc.
+    let tPath = null;
+    for (const [tag, fs] of tm) {
+      for (const f of fs) {
+        if (f.wt === 2) {
+          const val = str(tBytes, f);
+          if (val.includes('tasks/') || val.match(/^[0-9a-f-]{36}$/i)) {
+            tPath = val;
+            break;
+          }
+        }
+      }
+      if (tPath) break;
+    }
+    
     if (!tPath) continue;
-    const tMatch = str(tBytes, tPath).match(/tasks\/([0-9a-f-]{36})/i);
+    const tMatch = tPath.match(/tasks\/([0-9a-f-]{36})/i) || tPath.match(/([0-9a-f-]{36})/i);
     if (!tMatch) continue;
     const taskId = tMatch[1].toLowerCase();
     if (seen.has(taskId)) continue;
     seen.add(taskId);
 
-    const taskTitle = ((tm.get(2) || [])[0] && str(tBytes, (tm.get(2) || [])[0])) || 'Task';
-    const totalField = (tm.get(6) || [])[0];
-    const doneField = (tm.get(7) || [])[0];
-    const total = totalField ? Number(readVarint(tBytes, totalField.payloadStart).value) : 1;
-    const done = doneField ? Number(readVarint(tBytes, doneField.payloadStart).value) : 0;
-    
+    // Find the title string
+    let taskTitle = 'Task';
+    for (const [tag, fs] of tm) {
+      for (const f of fs) {
+        if (f.wt === 2) {
+          const val = str(tBytes, f);
+          if (val.startsWith('Task') || val.startsWith('Flashcards') || val.startsWith('Times Tables')) {
+            taskTitle = val;
+            break;
+          }
+        }
+      }
+    }
+
+    // Find total/done fields (usually 6 and 7, but could be different)
+    let total = 10, done = 0;
+    if (tm.has(6)) total = Number(readVarint(tBytes, tm.get(6)[0].payloadStart).value) || 10;
+    if (tm.has(7)) done = Number(readVarint(tBytes, tm.get(7)[0].payloadStart).value) || 0;
+
     tasks.push({
       taskId, title: taskTitle,
       isFlashcards: /flash\s*cards?/i.test(taskTitle),
@@ -219,51 +260,31 @@ export function parseGetPackage(buffer) {
   const raw = unframe(buffer);
   const top = byTag(raw, 0, raw.length);
   
-  // DIAGNOSTIC LOG
-  const tags = Array.from(top.keys()).join(',');
-  console.log(`[sparx] GetPackage top-level tags: ${tags}`);
-
-  let pkgBytes = null;
-  let packageId = null, title = 'Homework', dueDate = null;
-
-  // Try nested (packageactivity format)
   const f = (top.get(1) || [])[0];
-  if (f) {
-    pkgBytes = sub(raw, f);
-    const pm = byTag(pkgBytes, 0, pkgBytes.length);
-    const pathF = (pm.get(1) || [])[0];
-    if (pathF) {
-      const m = str(pkgBytes, pathF).match(/packages\/([0-9a-f-]{36})/i);
-      if (m) {
-        packageId = m[1].toLowerCase();
-        const titleF = (pm.get(2) || [])[0];
-        if (titleF) {
-          const t = str(pkgBytes, titleF).trim();
-          const match = t.match(/^(.+?)\s+due\s+(.+)$/i);
-          if (match) title = match[1].trim(); else title = t;
-        }
-        const dueField = (pm.get(9) || [])[0];
-        if (dueField) {
-          const d = timestampFromField(pkgBytes, dueField);
-          if (d) dueDate = d.toISOString();
-        }
-      }
-    }
-  }
-
-  if (!pkgBytes) {
-    // Try flat (swworker format) if no field 1
-    const t = (top.get(2) || [])[0];
-    if (!t) return null;
-    // If we have tasks directly, we still need the package ID. 
-    // For now, return null if we can't find the package ID.
-    console.log('[sparx] parseGetPackage: No field 1 package found.');
-    return null;
-  }
-
+  if (!f) return null;
+  const pkgBytes = sub(raw, f);
   const pm = byTag(pkgBytes, 0, pkgBytes.length);
-  const innerTags = Array.from(pm.keys()).join(',');
-  console.log(`[sparx] GetPackage inner tags: ${innerTags}`);
+
+  const pathF = (pm.get(1) || [])[0];
+  if (!pathF) return null;
+  const pkgMatch = str(pkgBytes, pathF).match(/packages\/([0-9a-f-]{36})/i);
+  if (!pkgMatch) return null;
+  const packageId = pkgMatch[1].toLowerCase();
+
+  let title = 'Homework';
+  const titleF = (pm.get(2) || [])[0];
+  if (titleF) {
+    const t = str(pkgBytes, titleF).trim();
+    const match = t.match(/^(.+?)\s+due\s+(.+)$/i);
+    if (match) title = match[1].trim(); else title = t;
+  }
+
+  let dueDate = null;
+  const dueField = (pm.get(9) || [])[0];
+  if (dueField) {
+    const d = timestampFromField(pkgBytes, dueField);
+    if (d) dueDate = d.toISOString();
+  }
 
   const { targetXp, doneXp } = getXpData(pm, pkgBytes);
   let percent = 0;
@@ -272,7 +293,5 @@ export function parseGetPackage(buffer) {
   }
 
   const tasks = extractTasksFromBytes(pkgBytes);
-  console.log(`[sparx] parseGetPackage extracted ${tasks.length} tasks.`);
-
   return { packageId, title, dueDate, accuracy: percent + '%', tasks };
 }
