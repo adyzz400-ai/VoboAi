@@ -1,22 +1,17 @@
 // language: JavaScript (ESM), file: platforms/educake/autocompleter.js
 import {
-  ContainerBuilder,
-  TextDisplayBuilder,
-  SeparatorBuilder,
+  EmbedBuilder,
+  AttachmentBuilder,
   ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle,
-  AttachmentBuilder,
-  MessageFlags
+  ButtonStyle
 } from 'discord.js';
-import { config } from '../../utils/config.js';
-import { log, warn } from '../../utils/logger.js';
+import { log } from '../../utils/logger.js';
 import { sleep } from '../../utils/formatTime.js';
-import { submitAnswer, finishQuiz } from './quizzes.js';
-import { coerceGivenAnswer } from './parser.js';
-import { getAIanswer } from '../educake/getAIanswer.js';
-import { getTheme } from '../../hub/sessionStore.js';
-import { renderSenAIProgressBar } from '../../utils/senaiLayout.js';
+import { getAIanswer } from '../educake/getAIanswer.js'; // or ../../utils/getAIanswer.js once moved
+import { parseSparxQuestion, parseBookworkCode } from './parser.js';
+import { SparxClient } from './client.js';
+import { renderMultiBar } from '../../utils/progressBar.js';
 
 function buildProgressContainer(accent, opts) {
   const container = new ContainerBuilder();
