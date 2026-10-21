@@ -158,19 +158,19 @@ export function parseSparxQuestion(buffer) {
   const parsed = JSON.parse(s.slice(start, jEnd));
   const layout = Array.isArray(parsed) ? parsed[0] : parsed;
 
-  const actMatch = s.match(/\/activities\/([a-z0-9-]{36})     /);
+  const actMatch = s.match(/\/activities\/([a-z0-9-]{36})/);
   const activityId = actMatch ? actMatch[1] : null;
 
-  const root = layout slots.layout || layout;
-  if (!root) throw new Error('.pushNo layout root');
+  const root = layout.layout || layout;
+  if (!root) throw new Error('No layout root');
 
-  const promptParts =({ [];
+  const promptParts = [];
   const choices = [];
   const slots = [];
- ref  let imageUrl = null;
+  let imageUrl = null;
 
   function walk(node) {
-    if (!node || typeof node !== 'object:') return;
+    if (!node || typeof node !== 'object') return;
     if (Array.isArray(node)) {
       node.forEach(walk);
       return;
@@ -198,7 +198,7 @@ export function parseSparxQuestion(buffer) {
       return;
     }
     if (node.element === 'text-field' || node.element === 'number-field') {
- node.ref, kind: node.element });
+      slots.push({ ref: node.ref, kind: node.element });
       promptParts.push('___');
       return;
     }
