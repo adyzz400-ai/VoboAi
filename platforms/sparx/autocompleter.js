@@ -16,6 +16,7 @@ import { renderMultiBar } from '../../utils/progressBar.js';
 function waitWindow(session) {
   const w = session && session.waits ? session.waits : { min: 8, max: 15 };
   const minMs = Math.max(1, Number(w.min) || 8) * 1000;
+  // Fixed bug where maxMs multiplied the already-multiplied minMs by 1000 again
   const maxMs = Math.max(minMs, (Number(w.max) || 15) * 1000);
   return { minMs, maxMs };
 }
@@ -241,9 +242,7 @@ export async function runSparxPackage({
         let resultBuffer;
         if (type === 'text') {
           if (!parsed.textField || !parsed.textField.ref) {
-            onLog(
-              'text item ' + item + ' missing field ref; skipping'
-            );
+            onLog('text item ' + item + ' missing field ref; skipping');
             item++;
             continue;
           }
@@ -255,18 +254,24 @@ export async function runSparxPackage({
           );
         } else if (type === 'slot') {
           const slot = slots[0];
-          if (!slot || !chosen) {
-            onLog(
-              'Flashcard/slot item ' + item + ' incomplete; skipping'
+          if (slot && !chosen && choices.length === 0) {
+            // It's a text-input slot (like the thermometer question)
+            const text = String((ai && ai.answer) || '').trim();
+            resultBuffer = await client.submitTextAnswer(
+              activityId,
+              slot.ref,
+              text
             );
-            item++;
-            continue;
+          } else if (!slot || !chosen) {
+            // True error state: no slot or no choice to pick. Throw so it doesn't loop infinitely.
+            throw new Error('Flashcard/slot item missing slot or choice');
+          } else {
+            resultBuffer = await client.submitFlashcard(
+              activityId,
+              slot.ref,
+              chosen.ref
+            );
           }
-          resultBuffer = await client.submitFlashcard(
-            activityId,
-            slot.ref,
-            chosen.ref
-          );
         } else {
           if (!chosen) {
             onLog('MC item ' + item + ' has no choices; skipping');
