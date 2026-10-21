@@ -24,28 +24,46 @@ function* fields(buf, start = 0, end = buf.length) {
 
 function sub(buf, f) { return buf.subarray(f.payloadStart, f.payloadEnd); }
 function str(buf, f) { return sub(buf, f).toString('utf8'); }
-
 function byTag(buf, start, end) {
   const m = new Map();
-  for (const f of fields(buf, start, end)) {
-    if (!m.has(f.tag)) m.set(f.tag, []);
-    m.get(f.tag).push(f);
-  }
+  for (const f of fields(buf, start, end)) { if (!m.has(f.tag)) m.set(f.tag, []); m.get(f.tag).push(f); }
   return m;
 }
 
 function unframe(buf) {
   if (!buf || buf.length < 5) return buf;
   if (buf[0] & 0x80) return Buffer.alloc(0);
-  const len = buf.readUInt32BE(1);
-  return (5 + len <= buf.length) ? buf.subarray(5, 5 + len) : buf.subarray(5);
+  let len = buf.readUInt32BE(1);
+  let payload = (5 + len <= buf.length) ? buf.subarray(5, 5 + len) : buf.subarray(5);
+  
+  // Strip gRPC-Web trailer if present
+  for (let i = 0; i <= payload.length - 5; i++) {
+    if ((payload[i] & 0x80) === 0x80) {
+      const trailerLen = payload.readUInt32BE(i + 1);
+      if (i + 5 + trailerLen === payload.length) {
+        return payload.subarray(0, i);
+      }
+    }
+  }
+  return payload;
+}
+
+function timestampFromField(buf, field) {
+  if (!field || field.wt !== 2) return null;
+  const nested = byTag(buf, field.payloadStart, field.payloadEnd);
+  const secField = (nested.get(1) || [])[0];
+  if (secField && secField.wt === 0) {
+    const secs = Number(readVarint(buf, secField.payloadStart).value);
+    if (secs > 1600000000 && secs < 2200000000) return new Date(secs * 1000);
+  }
+  return null;
 }
 
 function extractTasksFromBytes(pkgBytes) {
   const tasks = [];
-  const seenTasks = new Set();
+  const seen = new Set();
   const pm = byTag(pkgBytes, 0, pkgBytes.length);
-  
+
   for (const tf of pm.get(11) || []) {
     const tBytes = sub(pkgBytes, tf);
     const tm = byTag(tBytes, 0, tBytes.length);
@@ -54,12 +72,12 @@ function extractTasksFromBytes(pkgBytes) {
     const tMatch = str(tBytes, tPath).match(/tasks\/([0-9a-f-]{36})/i);
     if (!tMatch) continue;
     const taskId = tMatch[1].toLowerCase();
-    if (seenTasks.has(taskId)) continue;
-    seenTasks.add(taskId);
+    if (seen.has(taskId)) continue;
+    seen.add(taskId);
 
     const taskTitle = ((tm.get(2) || [])[0] && str(tBytes, (tm.get(2) || [])[0])) || 'Task';
     
-    // Real accuracy: count items with lastCorrect
+    // Accuracy calculation from items
     const tStr = tBytes.toString('utf8');
     const totalItems = (tStr.match(/items\//g) || []).length || 1;
     const completedItems = (tStr.match(/lastCorrect/g) || []).length;
@@ -73,29 +91,7 @@ function extractTasksFromBytes(pkgBytes) {
       accuracy
     });
   }
-
-  if (tasks.length === 0) {
-    const re = /tasks\/([0-9a-f-]{36})/gi;
-    let m, i = 1;
-    while ((m = re.exec(pkgBytes.toString('utf8'))) !== null) {
-      const id = m[1].toLowerCase();
-      if (seenTasks.has(id)) continue;
-      seenTasks.add(id);
-      const win = pkgBytes.toString('utf8').slice(Math.max(0, m.index - 80), m.index + 80);
-      let taskTitle = 'Task ' + i, isTimesTables = false, isFlashcards = false;
-      if (/times\s*tables/i.test(win)) { taskTitle = 'Times Tables'; isTimesTables = true; }
-      else if (/flash\s*cards?/i.test(win)) { taskTitle = 'Flashcards'; isFlashcards = true; }
-      tasks.push({ taskId: id, title: taskTitle, isFlashcards, isTimesTables, hasBookworkCheck: !isFlashcards && !isTimesTables, accuracy: '0%' });
-      i++;
-    }
-  }
-
-  // Package accuracy
-  let totalCompleted = 0;
-  tasks.forEach(t => { totalCompleted += parseInt(t.accuracy) || 0; });
-  const pkgAccuracy = tasks.length > 0 ? Math.round(totalCompleted / tasks.length) + '%' : '0%';
-
-  return { tasks, accuracy: pkgAccuracy };
+  return tasks;
 }
 
 export function parseSparxQuestion(buffer) {
@@ -119,14 +115,23 @@ export function parseSparxQuestion(buffer) {
   const activityId = actMatch ? actMatch[1] : null;
   const root = layout.layout || layout;
 
-  const promptParts = [], choices = [], slots = [], textFields = [];
+  const promptParts = [], choices = [], slots = [], textFields = [], numberFields = [];
   let imageUrl = null;
   const imgMatch = s.match(/"src"\s*:\s*"([^"]+)"/);
   if (imgMatch) imageUrl = imgMatch[1];
 
-  function walk(node) {
+  // Helper to find labels for number fields
+  function walk(node, prevText = '') {
     if (!node || typeof node !== 'object') return;
-    if (Array.isArray(node)) { node.forEach(walk); return; }
+    if (Array.isArray(node)) { 
+      let lastText = prevText;
+      for (const child of node) {
+        walk(child, lastText);
+        if (child.element === 'text') lastText = child.text;
+      }
+      return; 
+    }
+    
     if (node.element === 'text') { promptParts.push(node.text); return; }
     if (node.element === 'image' || node.element === 'img') { if (node.src) imageUrl = node.src; return; }
     if (node.element === 'card' || node.element === 'choice') {
@@ -134,17 +139,28 @@ export function parseSparxQuestion(buffer) {
       return;
     }
     if (node.element === 'slot') { slots.push({ ref: node.ref, accept: node.accept }); promptParts.push('___'); return; }
-    if (node.element === 'text-field' || node.element === 'number-field') { 
-      textFields.push({ ref: node.ref, kind: node.element }); promptParts.push('___'); return; 
+    if (node.element === 'number-field') { 
+      numberFields.push({ ref: node.ref, label: prevText }); promptParts.push('___'); return; 
     }
-    if (node.content) node.content.forEach(walk);
+    if (node.element === 'text-field') { 
+      textFields.push({ ref: node.ref }); promptParts.push('___'); return; 
+    }
+    if (node.content) {
+      let lastText = prevText;
+      for (const child of node.content) {
+        walk(child, lastText);
+        if (child.element === 'text') lastText = child.text;
+      }
+    }
   }
   walk(root);
 
   const prompt = promptParts.join(' ').replace(/\s+/g, ' ').trim();
 
+  if (numberFields.length > 0) {
+    return { prompt, choices: [], numberFields, image: imageUrl, activityId, type: 'number' };
+  }
   if (textFields.length > 0) {
-    // It's a multi-part question (1a, 1b). Return all fields in order.
     return { prompt, choices: [], textFields, image: imageUrl, activityId, type: 'text' };
   }
   if (slots.length > 0) {
@@ -162,45 +178,66 @@ export function parseBookworkCode(buffer) {
 export function parseGetPackage(buffer) {
   if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) return null;
   const raw = unframe(buffer);
-
-  let pkgBytes = null;
   const top = byTag(raw, 0, raw.length);
-  const f = (top.get(1) || [])[0];
-  if (f && f.wt === 2) pkgBytes = sub(raw, f);
-  if (!pkgBytes) return null;
+  let pkg = null;
+  const tasks = [];
 
-  const pm = byTag(pkgBytes, 0, pkgBytes.length);
-  const pathF = (pm.get(1) || [])[0];
-  if (!pathF) return null;
-  const pathStr = str(pkgBytes, pathF);
-  const pkgMatch = pathStr.match(/packages\/([0-9a-f-]{36})/i);
-  if (!pkgMatch) return null;
-  const packageId = pkgMatch[1].toLowerCase();
+  for (const [tag, fs] of top) {
+    for (const f of fs) {
+      if (tag === 1 && !pkg) {
+        const pkgBytes = sub(raw, f);
+        const pm = byTag(pkgBytes, 0, pkgBytes.length);
+        const pathF = (pm.get(1) || [])[0];
+        if (pathF) {
+          const m = str(pkgBytes, pathF).match(/packages\/([0-9a-f-]{36})/i);
+          if (m) {
+            const packageId = m[1].toLowerCase();
+            let title = 'Homework';
+            const titleF = (pm.get(2) || [])[0];
+            if (titleF) {
+              const t = str(pkgBytes, titleF).trim();
+              const match = t.match(/^(.+?)\s+due\s+(.+)$/i);
+              if (match) title = match[1].trim(); else title = t;
+            }
+            let dueDate = null;
+            const dueField = (pm.get(9) || [])[0];
+            if (dueField) {
+              const d = timestampFromField(pkgBytes, dueField);
+              if (d) dueDate = d.toISOString();
+            }
+            pkg = { packageId, title, dueDate, accuracy: '0%', tasks: [] };
+          }
+        }
+      }
+      if (tag === 2) {
+        const tBytes = sub(raw, f);
+        const tm = byTag(tBytes, 0, tBytes.length);
+        const tPath = (tm.get(1) || [])[0];
+        if (!tPath) continue;
+        const tMatch = str(tBytes, tPath).match(/tasks\/([0-9a-f-]{36})/i);
+        if (!tMatch) continue;
+        const taskId = tMatch[1].toLowerCase();
+        const taskTitle = ((tm.get(3) || [])[0] && str(tBytes, (tm.get(3) || [])[0])) || 'Task';
+        const numItems = (tm.get(6) || [])[0] ? Number(readVarint(tBytes, tm.get(6)[0].payloadStart).value) : 10;
+        const numDone = (tm.get(7) || [])[0] ? Number(readVarint(tBytes, tm.get(7)[0].payloadStart).value) : 0;
+        const acc = Math.round((numDone / numItems) * 100);
 
-  let title = 'Homework';
-  const titleF = (pm.get(2) || [])[0];
-  if (titleF) {
-    const t = str(pkgBytes, titleF).trim();
-    if (t) title = t.replace(/^[^A-Za-z0-9]+/, '').trim() || 'Homework';
-  }
-
-  // REAL DUE DATE: nested timestamp in tag 6 (seconds)
-  let dueDateMs = null;
-  for (const field of pm.get(6) || []) {
-    if (field.wt === 2) {
-      const nested = byTag(pkgBytes, field.payloadStart, field.payloadEnd);
-      const secField = (nested.get(1) || [])[0];
-      if (secField && secField.wt === 0) {
-        const sec = Number(readVarint(pkgBytes, secField.payloadStart).value);
-        if (sec > 1700000000 && sec < 2000000000) { dueDateMs = sec * 1000; break; }
+        tasks.push({
+          taskId, title: taskTitle,
+          isFlashcards: /flash\s*cards?/i.test(taskTitle),
+          isTimesTables: /times\s*tables/i.test(taskTitle),
+          hasBookworkCheck: !/flash\s*cards?/i.test(taskTitle) && !/times\s*tables/i.test(taskTitle),
+          accuracy: acc + '%'
+        });
       }
     }
   }
-  const dueDate = dueDateMs ? new Date(dueDateMs).toISOString() : null;
-
-  const { tasks, accuracy } = extractTasksFromBytes(pkgBytes);
-
-  return { packageId, title, dueDate, tasks, accuracy };
+  if (!pkg) return null;
+  pkg.tasks = tasks;
+  let totalDone = 0;
+  tasks.forEach(t => { totalDone += parseInt(t.accuracy) || 0; });
+  pkg.accuracy = tasks.length > 0 ? Math.round(totalDone / tasks.length) + '%' : '0%';
+  return pkg;
 }
 
 export function parseHomeworkList(buffer) {
@@ -209,7 +246,6 @@ export function parseHomeworkList(buffer) {
   const packages = [];
   const seen = new Set();
   const top = byTag(raw, 0, raw.length);
-  
   for (const f of top.get(1) || []) {
     const pkgBytes = sub(raw, f);
     const pm = byTag(pkgBytes, 0, pkgBytes.length);
