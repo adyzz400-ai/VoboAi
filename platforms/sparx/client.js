@@ -1,4 +1,6 @@
 // language: JavaScript (ESM), file: platforms/sparx/client.js
+// *gRPC-web client with fixed bookwork submission and swworker routing*
+
 import { log } from '../../utils/logger.js';
 
 export class SparxClient {
@@ -12,13 +14,12 @@ export class SparxClient {
     const length = payloadBuffer.length;
     const frame = Buffer.alloc(5 + length);
     frame.writeUInt8(0, 0); frame.writeUInt32BE(length, 1); payloadBuffer.copy(frame, 5);
-    
+
     const authHeader = this.session.jwt.startsWith('bearer ') ? this.session.jwt : 'bearer ' + this.session.jwt;
-    
-    // Use swworker for activity/action endpoints, packageactivity for packages
+
     let fullPath = path;
     if (path.includes('ActivityAction') || path.includes('GetActivity')) {
-       fullPath = path.replace('packageactivity.v1.Activities', 'swworker.v1.Sparxweb');
+      fullPath = path.replace('packageactivity.v1.Activities', 'swworker.v1.Sparxweb');
     }
 
     log('[sparx] POST ' + fullPath + ' frameHex=' + frame.toString('hex').slice(0, 60));
@@ -71,15 +72,12 @@ export class SparxClient {
     return this.request('/maths/sparx.packageactivity.v1.Activities/GetActivity', Buffer.concat([Buffer.from([0x12, pathStr.length]), Buffer.from(pathStr)]));
   }
 
-  // Helper to build the shared action wrapper
   buildAction(activityId, actionType, components = null) {
     const activityStr = '/activities/' + activityId;
     let inner;
     if (actionType === 0) {
-      // ReadyQuestion
-      inner = Buffer.from([0x1a, 0x02, 0x08, 0x00]); // actionType: 0
+      inner = Buffer.from([0x1a, 0x02, 0x08, 0x00]);
     } else {
-      // AnswerQuestion
       const comps = components.map(c => {
         const keyMsg = Buffer.concat([Buffer.from([0x0a, c.key.length]), Buffer.from(c.key)]);
         const valMsg = Buffer.concat([Buffer.from([0x12, c.value.length]), Buffer.from(c.value)]);
@@ -87,9 +85,9 @@ export class SparxClient {
       });
       const compsMsg = Buffer.concat(comps);
       const ansMsg = Buffer.concat([
-        Buffer.from([0x08, 0x01]), // actionType: 1
+        Buffer.from([0x08, 0x01]),
         Buffer.from([0x12, compsMsg.length]), compsMsg,
-        Buffer.from([0x1a, 0x00]) // hash: empty
+        Buffer.from([0x1a, 0x00])
       ]);
       inner = Buffer.concat([Buffer.from([0x12, ansMsg.length]), ansMsg]);
     }
@@ -116,7 +114,13 @@ export class SparxClient {
 
   async submitBookworkCheck(packageId, taskId, answer) {
     const pathStr = 'packages/' + packageId + '/tasks/' + taskId;
-    return this.request('/maths/sparx.packageactivity.v1.Activities/AnswerBookworkCheck', Buffer.concat([Buffer.from([0x0a, pathStr.length]), Buffer.from(pathStr), Buffer.from([0x10, 0x02])]));
+    const pathMsg = Buffer.concat([Buffer.from([0x0a, pathStr.length]), Buffer.from(pathStr)]);
+    const ansBuf = Buffer.from(answer, 'utf8');
+    const ansMsg = Buffer.concat([Buffer.from([0x12, ansBuf.length]), ansBuf]);
+    return this.request(
+      '/maths/sparx.packageactivity.v1.Activities/AnswerBookworkCheck',
+      Buffer.concat([pathMsg, ansMsg])
+    );
   }
 
   async submitTimesTablesOne(packageId, taskId, promptStr, answerStr) {
