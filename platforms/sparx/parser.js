@@ -1,4 +1,5 @@
 // language: JavaScript (ESM), file: platforms/sparx/parser.js
+// *Recursive task extraction, XP key broadening, diagnostic dump on miss*
 
 function readVarint(buf, pos) {
   let result = 0n, shift = 0n, byte;
@@ -35,13 +36,10 @@ function unframe(buf) {
   if (buf[0] & 0x80) return Buffer.alloc(0);
   let len = buf.readUInt32BE(1);
   let payload = (5 + len <= buf.length) ? buf.subarray(5, 5 + len) : buf.subarray(5);
-  
   for (let i = 0; i <= payload.length - 5; i++) {
     if ((payload[i] & 0x80) === 0x80) {
       const trailerLen = payload.readUInt32BE(i + 1);
-      if (i + 5 + trailerLen === payload.length) {
-        return payload.subarray(0, i);
-      }
+      if (i + 5 + trailerLen === payload.length) return payload.subarray(0, i);
     }
   }
   return payload;
@@ -78,7 +76,6 @@ function getXpData(pm, pkgBytes) {
           }
         }
         console.log(`[sparx] XP map entry: key="${k}", value=${v}`);
-        // Broadened matching to catch API variations beyond literal 'C' and 'T'
         if (k === 'C' || k === 'completed' || k === 'done' || k === 'earned') doneXp = v;
         if (k === 'T' || k === 'target' || k === 'total' || k === 'max') targetXp = v;
       }
@@ -91,54 +88,46 @@ function extractTasksFromBytes(pkgBytes) {
   const tasks = [];
   const seen = new Set();
   const pm = byTag(pkgBytes, 0, pkgBytes.length);
-
-  // Check multiple candidate tags; 11 is primary, but 10/12/8 are fallbacks if structure shifts
   const candidateTags = [11, 10, 12, 8];
-  
+
   for (const tagNum of candidateTags) {
     const tagFields = pm.get(tagNum) || [];
     if (tagFields.length === 0) continue;
 
     for (const tf of tagFields) {
       const tBytes = sub(pkgBytes, tf);
-      
-      // Recursive search for task path (UUID or 'tasks/' string) at any nesting depth
       let tPath = null;
+
       function findTaskPath(buf, start, end) {
         for (const f of fields(buf, start, end)) {
           if (f.wt === 2) {
             const val = str(buf, f);
-            if (val.includes('tasks/') || val.match(/^[0-9a-f-]{36}$/i)) {
-              return val;
-            }
+            if (val.includes('tasks/') || val.match(/^[0-9a-f-]{36}$/i)) return val;
             const res = findTaskPath(buf, f.payloadStart, f.payloadEnd);
             if (res) return res;
           }
         }
         return null;
       }
-      
+
       tPath = findTaskPath(tBytes, 0, tBytes.length);
-      
-      if (!tPath) {
-        // Diagnostic dump: if the primary tag yields nothing, print every string inside it
-        if (tagNum === 11 && tf === tagFields[0]) {
-          console.log(`[sparx] DEBUG: No task path found in tag ${tagNum}. Dumping nested strings:`);
-          function dumpStrings(buf, start, end, depth = 0) {
-            for (const f of fields(buf, start, end)) {
-              if (f.wt === 2) {
-                const val = str(buf, f);
-                if (val.length > 0 && val.length < 150 && !/[\x00-\x08]/.test(val)) {
-                  console.log(`[sparx]   ${' '.repeat(depth)}tag${f.tag}: "${val}"`);
-                }
-                dumpStrings(buf, f.payloadStart, f.payloadEnd, depth + 1);
+
+      if (!tPath && tagNum === 11 && tf === tagFields[0]) {
+        console.log(`[sparx] DEBUG: No task path in tag ${tagNum}. Dumping nested strings:`);
+        function dumpStrings(buf, start, end, depth = 0) {
+          for (const f of fields(buf, start, end)) {
+            if (f.wt === 2) {
+              const val = str(buf, f);
+              if (val.length > 0 && val.length < 150 && !/[\x00-\x08]/.test(val)) {
+                console.log(`[sparx]   ${' '.repeat(depth)}tag${f.tag}: "${val}"`);
               }
+              dumpStrings(buf, f.payloadStart, f.payloadEnd, depth + 1);
             }
           }
-          dumpStrings(tBytes, 0, tBytes.length);
         }
-        continue;
+        dumpStrings(tBytes, 0, tBytes.length);
       }
+      if (!tPath) continue;
 
       const tMatch = tPath.match(/tasks\/([0-9a-f-]{36})/i) || tPath.match(/([0-9a-f-]{36})/i);
       if (!tMatch) continue;
@@ -146,15 +135,12 @@ function extractTasksFromBytes(pkgBytes) {
       if (seen.has(taskId)) continue;
       seen.add(taskId);
 
-      // Recursive title search
       let taskTitle = 'Task';
       function findTitle(buf, start, end) {
         for (const f of fields(buf, start, end)) {
           if (f.wt === 2) {
             const val = str(buf, f);
-            if (val.length > 5 && (val.startsWith('Task') || val.startsWith('Flashcards') || val.startsWith('Times Tables') || val.includes('Question') || val.includes('Practice'))) {
-              return val;
-            }
+            if (val.length > 5 && (val.startsWith('Task') || val.startsWith('Flashcards') || val.startsWith('Times Tables') || val.includes('Question') || val.includes('Practice'))) return val;
             const res = findTitle(buf, f.payloadStart, f.payloadEnd);
             if (res) return res;
           }
@@ -164,7 +150,6 @@ function extractTasksFromBytes(pkgBytes) {
       const foundTitle = findTitle(tBytes, 0, tBytes.length);
       if (foundTitle) taskTitle = foundTitle;
 
-      // Recursive count search (tags 6 and 7 are common, but we scan all varints)
       let total = 10, done = 0;
       function findCounts(buf, start, end) {
         for (const f of fields(buf, start, end)) {
@@ -179,7 +164,7 @@ function extractTasksFromBytes(pkgBytes) {
       findCounts(tBytes, 0, tBytes.length);
 
       tasks.push({
-        taskId, 
+        taskId,
         title: taskTitle,
         isFlashcards: /flash\s*cards?/i.test(taskTitle),
         isTimesTables: /times\s*tables/i.test(taskTitle),
@@ -217,10 +202,10 @@ export function parseSparxQuestion(buffer) {
 
   function walk(node, prevText = '') {
     if (!node || typeof node !== 'object') return;
-    if (Array.isArray(node)) { 
+    if (Array.isArray(node)) {
       let lastText = prevText;
       for (const child of node) { walk(child, lastText); if (child.element === 'text') lastText = child.text; }
-      return; 
+      return;
     }
     if (node.element === 'text') { promptParts.push(node.text); return; }
     if (node.element === 'image' || node.element === 'img') { if (node.src) imageUrl = node.src; return; }
@@ -256,7 +241,7 @@ export function parseHomeworkList(buffer) {
   const packages = [];
   const seen = new Set();
   const top = byTag(raw, 0, raw.length);
-  
+
   for (const f of top.get(1) || []) {
     const pkgBytes = sub(raw, f);
     const pm = byTag(pkgBytes, 0, pkgBytes.length);
@@ -292,7 +277,7 @@ export function parseGetPackage(buffer) {
   if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) return null;
   const raw = unframe(buffer);
   const top = byTag(raw, 0, raw.length);
-  
+
   const f = (top.get(1) || [])[0];
   if (!f) return null;
   const pkgBytes = sub(raw, f);
