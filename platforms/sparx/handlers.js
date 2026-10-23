@@ -74,9 +74,9 @@ export const sparxHandlers = {
               const baseList = parseHomeworkList(listBuffer);
               const homeworkList = [];
               let totalTasks = 0;
-              let globalTaskCounter = 1;
 
               for (const pkg of baseList) {
+                let taskCounter = 1; // FIXED: Reset counter for each package
                 try {
                   const pkgBuffer = await client.getPackage(pkg.packageId);
                   const detailed = parseGetPackage(pkgBuffer);
@@ -88,9 +88,9 @@ export const sparxHandlers = {
 
                     pkg.tasks.forEach(t => {
                       if (t.title === 'Homework' || t.title === 'Task' || t.title.length < 5) {
-                        t.title = 'Task ' + globalTaskCounter;
+                        t.title = 'Task ' + taskCounter;
                       }
-                      globalTaskCounter++;
+                      taskCounter++;
                     });
 
                     if (!pkg.accuracy || pkg.accuracy === '0%') {
