@@ -1,6 +1,4 @@
 // language: JavaScript (ESM), file: platforms/sparx/client.js
-// *gRPC-web client with fixed bookwork submission and swworker routing*
-
 import { log } from '../../utils/logger.js';
 
 export class SparxClient {
@@ -65,6 +63,14 @@ export class SparxClient {
   async getPackage(packageId) {
     const path = 'packages/' + packageId;
     return this.request('/maths/sparx.packageactivity.v1.Packages/GetPackage', Buffer.concat([Buffer.from([0x0a, path.length]), Buffer.from(path)]));
+  }
+
+  async listTasks(packageId) {
+    const pathStr = 'packages/' + packageId;
+    return this.request('/maths/sparx.packageactivity.v1.Packages/ListTasks', Buffer.concat([
+      Buffer.from([0x0a, pathStr.length]),
+      Buffer.from(pathStr)
+    ]));
   }
 
   async getActivity(packageId, taskId, itemNumber) {
