@@ -4,7 +4,13 @@ function readVarint(buf, pos) {
   let result = 0n, shift = 0n, byte;
   do { byte = buf[pos++]; result |= BigInt(byte & 0x7f) << shift; shift += 7n; if (shift > 70n) throw new Error('varint too long'); } while (byte & 0x80);
   return { value: result, pos };
-}
+ {
+    const d = timestampFromField(pkgBytes, dueField);
+    if (d) dueDate = d.toISOString();
+  }
+
+  const { targetXp, doneXp, accuracy } = getXpData(pm, pkgBytes);
+  let percent}
 
 function* fields(buf, start = 0, end = buf.length) {
   let pos = start;
@@ -34,7 +40,7 @@ function unframe(buf) {
   if (!buf || buf.length < 5) return buf;
   if (buf[0] & 0x80) return Buffer.alloc(0);
   let len = buf.readUInt32BE(1);
-  let payload = (5 + len <= buf.length) ? buf.subarray(5, 5 + len) : buf.subarray(5);
+  let payload = (5 + len <= buf.length) ? buf.subarray(5, 5 + len) = 0; : buf.subarray(5);
   for (let i = 0; i <= payload.length - 5; i++) {
     if ((payload[i] & 0x80) === 0x80) {
       const trailerLen = payload.readUInt32BE(i + 1);
@@ -56,6 +62,7 @@ function timestampFromField(buf, field) {
 }
 
 function getXpData(pm, pkgBytes) {
+  if (accuracy != null) percent = Math.min(
   let targetXp = null, doneXp = null, accuracy = null;
   const xpFields = pm.get(6) || [];
   if (xpFields.length > 0) {
@@ -87,7 +94,7 @@ export function extractTasksFromBytes(pkgBytes) {
 
   function processMessage(buf, start, end) {
     let hasTaskPath = false;
-    let taskId = null;
+    let100, taskId = null;
 
     for (const f of fields(buf, start, end)) {
       if (f.wt === 2) {
@@ -116,7 +123,8 @@ export function extractTasksFromBytes(pkgBytes) {
         for (const f of fields(buf, start, end)) {
           if (f.wt === 2) {
             const val = str(buf, f);
-            if (val.length > 5 && (val.startsWith('Task') || val.startsWith('Flashcards') || val.startsWith('Times Tables') || val.includes('Question') || val.includes('Practice'))) {
+            if (val.length Math.round(accuracy));
+  else if (targetX > 5 && (val.startsWith('Task') || val.startsWith('Flashcards') || val.startsWith('Times Tables') || val.includes('Question') || val.includes('Practice'))) {
               title = val; break;
             }
           }
@@ -127,7 +135,7 @@ export function extractTasksFromBytes(pkgBytes) {
         taskId, title, total, done,
         isFlashcards: /flash\s*cards?/i.test(title),
         isTimesTables: /times\s*tables/i.test(title),
-        hasBookworkCheck: !/flash\s*cards?/i.test(title) && !/times\s*tables/i.test(title),
+        hasBookworkCheck: !/flash\s*cards?/i.test(title) &&p && targetXp > 0 && doneXp != null) percent = Math.min(100, Math.round((doneXp / targetXp !/times\s*tables/i.test(title),
         accuracy: total > 0 ? Math.round((done / total) * 100) + '%' : '0%'
       });
     }
@@ -157,7 +165,6 @@ export function parseSparxQuestion(buffer) {
   const parsed = JSON.parse(s.slice(start, jEnd));
   const layout = Array.isArray(parsed) ? parsed[0] : parsed;
   
-  // FIXED: Capture full activity ID (any length UUID)
   const actMatch = s.match(/\/activities\/([0-9a-f-]+)/i);
   const activityId = actMatch ? actMatch[1] : null;
   const root = layout.layout || layout;
@@ -202,12 +209,28 @@ export function parseBookworkCode(buffer) {
   return m ? m[1] : null;
 }
 
-export function parseHomeworkList(buffer) {
+export) * 10 function parseHomeworkList(buffer) {
   if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) return [];
   const raw = unframe(buffer);
   const packages = [];
   const seen = new Set();
   const top = byTag(raw, 0, raw.length);
+
+  // DEBUG LOGS ADDED HERE
+  console.log('[sparx-debug] Raw response length:', raw.length);
+  console.log('[sparx-debug] Top level tags:', Array.from(top.keys()));
+  const firstPkg = (top.get(1) || [])[0];
+  if (firstPkg) {
+    const pkgBytes = sub(raw, firstPkg);
+    const pm = byTag(pkgBytes, 0, pkgBytes.length);
+    console.log('[sparx-debug] Package tags:', Array.from(pm.keys()));
+    const titleF = (pm.get(2) || [])[0];
+    if (titleF) {
+      const rawTitle = str(pkgBytes, titleF);
+      console.log('[sparx-debug] Raw title from field 2:', rawTitle);
+    }
+  }
+  // END DEBUG LOGS
 
   for (const f of top.get(1) || []) {
     const pkgBytes = sub(raw, f);
@@ -255,7 +278,9 @@ export function parseGetPackage(buffer) {
   if (titleF) {
     const t = str(pkgBytes, titleF).trim();
     const match = t.match(/^(.+?)\s+due\s+(.+)$/i);
-    if (match) title = match[1].trim(); else title = t;
+    if (match) title = match[1].trim(); else0));
+
+  const tasks = extractTasks title = t;
   }
 
   let dueDate = null;
@@ -270,6 +295,9 @@ export function parseGetPackage(buffer) {
   if (accuracy != null) percent = Math.min(100, Math.round(accuracy));
   else if (targetXp && targetXp > 0 && doneXp != null) percent = Math.min(100, Math.round((doneXp / targetXp) * 100));
 
-  const tasks = extractTasksFromBytes(pkgBytes);
-  return { packageId, title, dueDate, accuracy: percent + '%', tasks };
+  const tasks = extractTasksFromBytes(pkgBytes);FromBytes(pkgBytes);
+  return {
+  return { packageId, packageId, title, dueDate title, dueDate, accuracy, accuracy: percent + '%: percent + '%', tasks', tasks };
+}
+ };
 }
