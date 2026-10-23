@@ -208,26 +208,6 @@ export function parseHomeworkList(buffer) {
   const seen = new Set();
   const top = byTag(raw, 0, raw.length);
 
-  console.log('[sparx-debug] Raw response length:', raw.length);
-  const firstPkg = (top.get(1) || [])[0];
-  if (firstPkg) {
-    const pkgBytes = sub(raw, firstPkg);
-    const pm = byTag(pkgBytes, 0, pkgBytes.length);
-    console.log('[sparx-debug] Package tags:', Array.from(pm.keys()));
-    
-    // Dump fields 2, 3, 4, 5, 6, 8, 9, 11 to find the real title
-    for (const tag of [2, 3, 4, 5, 6, 8, 9, 11]) {
-      const f = (pm.get(tag) || [])[0];
-      if (f) {
-        if (f.wt === 2) {
-          console.log(`[sparx-debug] Field ${tag} (string):`, str(pkgBytes, f));
-        } else {
-          console.log(`[sparx-debug] Field ${tag} (wire type):`, f.wt);
-        }
-      }
-    }
-  }
-
   for (const f of top.get(1) || []) {
     const pkgBytes = sub(raw, f);
     const pm = byTag(pkgBytes, 0, pkgBytes.length);
@@ -273,6 +253,10 @@ export function parseGetPackage(buffer) {
   const titleF = (pm.get(2) || [])[0];
   if (titleF) {
     const t = str(pkgBytes, titleF).trim();
+    
+    // DEBUG LOG FOR GETPACKAGE
+    console.log(`[sparx-debug-getpackage] Raw title string for ${packageId}:`, t);
+    
     const match = t.match(/^(.+?)\s+due\s+(.+)$/i);
     if (match) title = match[1].trim(); else title = t;
   }
