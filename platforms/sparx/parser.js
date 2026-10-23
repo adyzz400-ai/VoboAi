@@ -208,7 +208,6 @@ export function parseHomeworkList(buffer) {
   const seen = new Set();
   const top = byTag(raw, 0, raw.length);
 
-  // DEBUG LOGS ADDED HERE
   console.log('[sparx-debug] Raw response length:', raw.length);
   console.log('[sparx-debug] Top level tags:', Array.from(top.keys()));
   const firstPkg = (top.get(1) || [])[0];
@@ -222,7 +221,6 @@ export function parseHomeworkList(buffer) {
       console.log('[sparx-debug] Raw title from field 2:', rawTitle);
     }
   }
-  // END DEBUG LOGS
 
   for (const f of top.get(1) || []) {
     const pkgBytes = sub(raw, f);
