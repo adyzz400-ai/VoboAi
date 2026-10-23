@@ -1,6 +1,7 @@
 // language: JavaScript (ESM), file: platforms/sparx/login.js
 import puppeteerExtra from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import fs from 'fs';
 import { config } from '../../utils/config.js';
 import { log } from '../../utils/logger.js';
 
@@ -24,11 +25,34 @@ export async function sparxLogin({ school, username, password, onStatus }) {
       ]
     };
 
-    // Allow override via .env, otherwise fallback to config. 
-    // If empty, omit entirely so Puppeteer finds the host's default binary.
-    const execPath = process.env.PUPPETEER_EXECUTABLE_PATH || config.chromePath;
-    if (execPath && execPath.trim() !== '') {
-      launchOptions.executablePath = execPath;
+    // 1. Check env or config, explicitly blocking the known bad path
+    const rawPath = process.env.PUPPETEER_EXECUTABLE_PATH || config.chromePath;
+    let validPath = rawPath && rawPath.trim() !== '' && rawPath !== '/usr/bin/chromium' 
+      ? rawPath 
+      : undefined;
+
+    // 2. If still undefined, scan for the actual browser binary on bot-hosting.net
+    if (!validPath) {
+      const commonPaths = [
+        '/usr/bin/google-chrome',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium' // Last resort, though we know it failed before
+      ];
+      for (const p of commonPaths) {
+        if (fs.existsSync(p)) {
+          validPath = p;
+          log(`[sparx-login] Auto-discovered browser at: ${validPath}`);
+          break;
+        }
+      }
+    }
+
+    // 3. Apply path or fallback to channel discovery
+    if (validPath) {
+      launchOptions.executablePath = validPath;
+    } else {
+      launchOptions.channel = 'chrome';
+      log('[sparx-login] No path found, falling back to channel: chrome');
     }
 
     browser = await puppeteerExtra.launch(launchOptions);
