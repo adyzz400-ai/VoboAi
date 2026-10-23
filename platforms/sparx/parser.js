@@ -56,7 +56,7 @@ function timestampFromField(buf, field) {
 }
 
 function getXpData(pm, pkgBytes) {
-  let targetXp = null, doneXp = null;
+  let targetXp = null, doneXp = null, accuracy = null;
   const xpFields = pm.get(6) || [];
   if (xpFields.length > 0) {
     const nested = byTag(pkgBytes, xpFields[0].payloadStart, xpFields[0].payloadEnd);
@@ -74,10 +74,12 @@ function getXpData(pm, pkgBytes) {
         }
         if (k === 'C' || k === 'completed' || k === 'done' || k === 'earned') doneXp = v;
         if (k === 'T' || k === 'target' || k === 'total' || k === 'max') targetXp = v;
+        // "AC" = accuracy percentage directly from server
+        if (k === 'AC' || k === 'accuracy') accuracy = v;
       }
     }
   }
-  return { targetXp, doneXp };
+  return { targetXp, doneXp, accuracy };
 }
 
 export function extractTasksFromBytes(pkgBytes) {
@@ -87,8 +89,7 @@ export function extractTasksFromBytes(pkgBytes) {
   function processMessage(buf, start, end) {
     let hasTaskPath = false;
     let taskId = null;
-    
-    // First pass: check if this message block contains a task path
+
     for (const f of fields(buf, start, end)) {
       if (f.wt === 2) {
         const val = str(buf, f);
@@ -101,14 +102,12 @@ export function extractTasksFromBytes(pkgBytes) {
       }
     }
 
-    // If this block is a task object, extract its details
     if (hasTaskPath && taskId && !seen.has(taskId)) {
       seen.add(taskId);
-      
+
       let title = 'Task';
       let total = 10, done = 0;
-      
-      // Second pass: extract tags 2 (title), 6 (total), 7 (done) from this SAME message block
+
       for (const f of fields(buf, start, end)) {
         if (f.tag === 2 && f.wt === 2) {
           title = str(buf, f).trim();
@@ -119,7 +118,6 @@ export function extractTasksFromBytes(pkgBytes) {
         }
       }
 
-      // Fallback title search if tag 2 wasn't descriptive
       if (title === 'Task' || title.length < 5) {
         for (const f of fields(buf, start, end)) {
           if (f.wt === 2) {
@@ -135,6 +133,8 @@ export function extractTasksFromBytes(pkgBytes) {
       tasks.push({
         taskId,
         title,
+        total,
+        done,
         isFlashcards: /flash\s*cards?/i.test(title),
         isTimesTables: /times\s*tables/i.test(title),
         hasBookworkCheck: !/flash\s*cards?/i.test(title) && !/times\s*tables/i.test(title),
@@ -142,7 +142,6 @@ export function extractTasksFromBytes(pkgBytes) {
       });
     }
 
-    // Recurse into all nested message blocks
     for (const f of fields(buf, start, end)) {
       if (f.wt === 2) {
         processMessage(buf, f.payloadStart, f.payloadEnd);
@@ -240,13 +239,8 @@ export function parseHomeworkList(buffer) {
       else title = t;
     }
 
-    const { targetXp, doneXp } = getXpData(pm, pkgBytes);
-    let percent = 0;
-    if (targetXp && targetXp > 0 && doneXp != null) {
-      percent = Math.min(100, Math.round((doneXp / targetXp) * 100));
-    }
-
-    packages.push({ packageId, title, dueText, accuracy: percent + '%', tasks: [] });
+    // Accuracy will be recalculated after tasks are fetched
+    packages.push({ packageId, title, dueText, accuracy: '0%', tasks: [] });
   }
   return packages;
 }
@@ -282,9 +276,11 @@ export function parseGetPackage(buffer) {
     if (d) dueDate = d.toISOString();
   }
 
-  const { targetXp, doneXp } = getXpData(pm, pkgBytes);
+  const { targetXp, doneXp, accuracy } = getXpData(pm, pkgBytes);
   let percent = 0;
-  if (targetXp && targetXp > 0 && doneXp != null) {
+  if (accuracy != null) {
+    percent = Math.min(100, Math.round(accuracy));
+  } else if (targetXp && targetXp > 0 && doneXp != null) {
     percent = Math.min(100, Math.round((doneXp / targetXp) * 100));
   }
 
