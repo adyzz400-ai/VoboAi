@@ -1,6 +1,4 @@
 // language: JavaScript (ESM), file: platforms/sparx/autocompleter.js
-// *SenAi/ChurrosAi parity: bookwork bypass, smart retry, keepalive, validation, human timing*
-
 import { EmbedBuilder, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { log, warn } from '../../utils/logger.js';
 import { sleep } from '../../utils/formatTime.js';
@@ -96,12 +94,14 @@ export async function runSparxPackage({ session, packageId, homework, interactio
 
   const taskProgress = {};
   homework.tasks.forEach((t) => {
-    taskProgress[t.taskId] = { label: t.title, filled: 0, total: t.isTimesTables ? 30 : 10 };
+    // Use the actual total from the server, default to 10 if missing
+    taskProgress[t.taskId] = { label: t.title, filled: 0, total: t.total || 10 };
   });
 
   const failedTasks = [];
   let totalCorrect = 0, questionsCompleted = 0;
-  const totalQuestions = homework.tasks.reduce((sum, t) => sum + (t.isTimesTables ? 30 : 10), 0);
+  // Calculate total questions based on actual server data
+  const totalQuestions = homework.tasks.reduce((sum, t) => sum + (t.total || 10), 0);
   const startTime = Date.now();
   const { minMs, maxMs } = waitWindow(session);
 
@@ -109,18 +109,21 @@ export async function runSparxPackage({ session, packageId, homework, interactio
     for (let i = 0; i < homework.tasks.length; i++) {
       if (signal.cancelled) break;
       const task = homework.tasks[i];
+      const taskTotal = task.total || 10; // Use server-provided total
+      
       onLog('Starting ' + task.title + '...');
 
+      // --- Times tables: fast path (no wait, as requested) ---
       if (task.isTimesTables) {
         let ttCorrect = 0;
-        for (let q = 0; q < 30; q++) {
+        for (let q = 0; q < taskTotal; q++) { // Loop exactly taskTotal times
           if (signal.cancelled) break;
           const a = Math.floor(Math.random() * 12) + 1;
           const b = Math.floor(Math.random() * 12) + 1;
           const promptStr = a + 'x' + b + '=?';
           const answerStr = String(a * b);
           taskProgress[task.taskId].filled = q + 1;
-          questionsCompleted = homework.tasks.slice(0, i).reduce((s, t) => s + (t.isTimesTables ? 30 : 10), 0) + (q + 1);
+          questionsCompleted = homework.tasks.slice(0, i).reduce((s, t) => s + (t.total || 10), 0) + (q + 1);
           await updateUI(interaction, taskProgress, homework, task.title, a + ' × ' + b + ' = ?', questionsCompleted, totalQuestions, totalCorrect + ttCorrect, startTime, null);
           try {
             await client.submitTimesTablesOne(packageId, task.taskId, promptStr, answerStr);
@@ -130,12 +133,14 @@ export async function runSparxPackage({ session, packageId, homework, interactio
           }
           await sleep(800 + Math.random() * 500);
         }
-        taskProgress[task.taskId].filled = 30;
+        taskProgress[task.taskId].filled = taskTotal;
         totalCorrect += ttCorrect;
         continue;
       }
 
+      // --- Standard task with wait before answering ---
       try {
+        // Bookwork bypass
         try {
           const bwBuffer = await client.getBookworkCheck(packageId, task.taskId);
           const bwCode = parseBookworkCode(bwBuffer);
@@ -145,7 +150,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
             onLog('Bookwork bypass: ' + bwCode);
           }
         } catch (err) {
-          warn('[sparx] bookwork bypass failed: ' + err.message);
+          // Ignore bookwork errors (e.g. "not enabled")
         }
 
         let item = 1;
@@ -153,7 +158,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
         let taskCorrect = 0;
         const maxRetries = 3;
 
-        while (!signal.cancelled) {
+        while (!signal.cancelled && item <= taskTotal) {
           let parsed;
           try {
             parsed = parseSparxQuestion(buffer);
@@ -161,7 +166,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
             warn('[sparx] parse failed on item ' + item + ': ' + err.message);
             break;
           }
-
+          
           const { prompt, choices, activityId, type } = parsed;
           if (!activityId) {
             log('[sparx] no activityId — task complete or malformed response');
@@ -169,7 +174,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
           }
 
           taskProgress[task.taskId].filled = item - 1;
-          questionsCompleted = homework.tasks.slice(0, i).reduce((s, t) => s + (t.isTimesTables ? 30 : 10), 0) + (item - 1);
+          questionsCompleted = homework.tasks.slice(0, i).reduce((s, t) => s + (t.total || 10), 0) + (item - 1);
           await updateUI(interaction, taskProgress, homework, task.title, prompt, questionsCompleted, totalQuestions, totalCorrect + taskCorrect, startTime, '🤖 Thinking…');
 
           await client.readyQuestion(activityId).catch(() => {});
@@ -188,7 +193,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
 
           while (retries < maxRetries) {
             const validation = validateAnswer(ai, parsed);
-
+            
             if (validation.valid) {
               if (type === 'number') {
                 components = parsed.numberFields.map(f => ({ key: f.ref, value: String(validation.answers[f.ref] || '0') }));
@@ -200,7 +205,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
                 const slotMsg = Buffer.concat([Buffer.from([0x0a, slot.ref.length]), Buffer.from(slot.ref)]);
                 const inner = Buffer.concat([Buffer.from([0x0a, slotMsg.length]), slotMsg, Buffer.from([0x12, card.ref.length]), Buffer.from(card.ref)]);
                 buffer = await client.request('/maths/sparx.packageactivity.v1.Activities/ActivityAction', Buffer.concat([Buffer.from([0x0a, activityId.length+11]), Buffer.from('/activities/'+activityId), Buffer.from([0x12, inner.length]), inner]));
-                taskCorrect++; item++;
+                taskCorrect++; item++; 
                 await sleep(humanDelay(minMs, maxMs, item === 2));
                 continue;
               } else {
@@ -213,13 +218,14 @@ export async function runSparxPackage({ session, packageId, homework, interactio
             retries++;
             warn(`[sparx] answer validation failed (attempt ${retries}): ${validation.reason}`);
             onLog(`Retry ${retries}/${maxRetries} — eliminating wrong answer`);
-
+            
             if (type === 'multiple' || type === 'slot') {
               eliminatedChoices.push(ai.answer);
               const retryResult = await retryWithElimination({ parsed, session, eliminatedChoices });
               if (!retryResult) break;
               ai = retryResult.ai;
-              components = [{ key: retryResult.chosen.ref, value: retryResult.chosen.text }];
+              const chosen = retryResult.chosen;
+              components = [{ key: chosen.ref, value: chosen.text }];
             } else {
               ai = await getAIanswer(
                 { kind: type === 'number' ? 'number' : 'short_answer', prompt: cleanPrompt, choices: cleanChoices, image: parsed.image || null, fields: parsed.numberFields || parsed.textFields },
@@ -228,6 +234,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
             }
           }
 
+          // WAIT BEFORE ANSWERING (Human-like delay)
           const waitMs = humanDelay(minMs, maxMs, item === 1);
           let waited = 0;
           while (waited < waitMs) {
@@ -290,7 +297,7 @@ async function updateUI(interaction, progress, homework, currentTaskName, questi
   const mins = Math.floor((Date.now() - startTime) / 60000);
   const secs = Math.floor(((Date.now() - startTime) % 60000) / 1000);
   const dueStr = homework.dueDate ? new Date(homework.dueDate).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : '—';
-
+  
   const embed = new EmbedBuilder()
     .setColor(0x0a78ff)
     .setAuthor({ name: 'Vobo AI · Sparx Maths' })
