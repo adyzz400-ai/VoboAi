@@ -1,5 +1,4 @@
 // language: JavaScript (ESM), file: platforms/sparx/parser.js
-// *Recursive task extraction, XP key broadening, diagnostic dump on miss*
 
 function readVarint(buf, pos) {
   let result = 0n, shift = 0n, byte;
@@ -61,11 +60,9 @@ function getXpData(pm, pkgBytes) {
   const xpFields = pm.get(6) || [];
   if (xpFields.length > 0) {
     const nested = byTag(pkgBytes, xpFields[0].payloadStart, xpFields[0].payloadEnd);
-    console.log(`[sparx] XP field 6 nested tags: ${Array.from(nested.keys()).join(',')}`);
     const f1 = (nested.get(1) || [])[0];
     if (f1) {
       const inner = byTag(pkgBytes, f1.payloadStart, f1.payloadEnd);
-      console.log(`[sparx] XP field 6 -> 1 nested tags: ${Array.from(inner.keys()).join(',')}`);
       for (const t of inner.get(3) || []) {
         const u = byTag(pkgBytes, t.payloadStart, t.payloadEnd);
         let k = null, v = null;
@@ -75,7 +72,6 @@ function getXpData(pm, pkgBytes) {
             if (tag === 2 && f.wt === 1) v = pkgBytes.readDoubleLE(f.payloadStart);
           }
         }
-        console.log(`[sparx] XP map entry: key="${k}", value=${v}`);
         if (k === 'C' || k === 'completed' || k === 'done' || k === 'earned') doneXp = v;
         if (k === 'T' || k === 'target' || k === 'total' || k === 'max') targetXp = v;
       }
@@ -84,11 +80,23 @@ function getXpData(pm, pkgBytes) {
   return { targetXp, doneXp };
 }
 
-function extractTasksFromBytes(pkgBytes) {
+export function extractTasksFromBytes(pkgBytes) {
   const tasks = [];
   const seen = new Set();
+  
+  // 1. RAW BUFFER FAILSAFE: Scan the entire buffer for UUIDs directly
+  const rawStr = pkgBytes.toString('utf8');
+  const uuidMatches = rawStr.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi);
+  if (uuidMatches) {
+    const uniqueUuids = [...new Set(uuidMatches)];
+    console.log(`[sparx] Raw buffer UUID scan found: ${uniqueUuids.slice(0, 5).join(', ')}...`);
+  } else {
+    console.log('[sparx] WARNING: No UUIDs found in raw buffer. Tasks may not be in GetPackage payload.');
+  }
+
   const pm = byTag(pkgBytes, 0, pkgBytes.length);
-  const candidateTags = [11, 10, 12, 8];
+  // Expanded candidate tags based on Sparx protobuf variations
+  const candidateTags = [11, 10, 12, 8, 3, 4];
 
   for (const tagNum of candidateTags) {
     const tagFields = pm.get(tagNum) || [];
@@ -112,6 +120,7 @@ function extractTasksFromBytes(pkgBytes) {
 
       tPath = findTaskPath(tBytes, 0, tBytes.length);
 
+      // Diagnostic dump if primary tag fails
       if (!tPath && tagNum === 11 && tf === tagFields[0]) {
         console.log(`[sparx] DEBUG: No task path in tag ${tagNum}. Dumping nested strings:`);
         function dumpStrings(buf, start, end, depth = 0) {
@@ -127,6 +136,7 @@ function extractTasksFromBytes(pkgBytes) {
         }
         dumpStrings(tBytes, 0, tBytes.length);
       }
+      
       if (!tPath) continue;
 
       const tMatch = tPath.match(/tasks\/([0-9a-f-]{36})/i) || tPath.match(/([0-9a-f-]{36})/i);
@@ -173,6 +183,11 @@ function extractTasksFromBytes(pkgBytes) {
       });
     }
   }
+  
+  if (tasks.length === 0) {
+    console.log('[sparx] FINAL WARNING: extractTasksFromBytes returned 0 tasks. Check raw buffer scan above.');
+  }
+  
   return tasks;
 }
 
