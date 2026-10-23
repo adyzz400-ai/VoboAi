@@ -80,101 +80,78 @@ function getXpData(pm, pkgBytes) {
   return { targetXp, doneXp };
 }
 
-export function parseHomeworkList(buffer) {
-  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) return [];
-  const raw = unframe(buffer);
-  
-  // DIAGNOSTIC: Print raw string snippet to find task references
-  const rawStr = raw.toString('utf8');
-  const taskMatch = rawStr.match(/tasks\/[0-9a-f-]{36}/gi);
-  if (taskMatch) {
-    console.log('[sparx] DIAGNOSTIC: Found tasks in ListStudentPackages raw buffer:', [...new Set(taskMatch)].slice(0, 3));
-  } else {
-    console.log('[sparx] DIAGNOSTIC: No tasks in ListStudentPackages raw buffer. Snippet:', rawStr.slice(0, 1500).replace(/[\x00-\x1F]/g, '?'));
-  }
-
-  const packages = [];
+export function extractTasksFromBytes(pkgBytes) {
+  const tasks = [];
   const seen = new Set();
-  const top = byTag(raw, 0, raw.length);
 
-  for (const f of top.get(1) || []) {
-    const pkgBytes = sub(raw, f);
-    const pm = byTag(pkgBytes, 0, pkgBytes.length);
-    const pathF = (pm.get(1) || [])[0];
-    if (!pathF) continue;
-    const pkgMatch = str(pkgBytes, pathF).match(/packages\/([0-9a-f-]{36})/i);
-    if (!pkgMatch) continue;
-    const packageId = pkgMatch[1].toLowerCase();
-    if (seen.has(packageId)) continue;
-    seen.add(packageId);
-
-    let title = 'Homework', dueText = null;
-    const titleF = (pm.get(2) || [])[0];
-    if (titleF) {
-      const t = str(pkgBytes, titleF).trim();
-      const match = t.match(/^(.+?)\s+due\s+(.+)$/i);
-      if (match) { title = match[1].trim(); dueText = match[2].trim(); }
-      else title = t;
+  function processMessage(buf, start, end) {
+    let hasTaskPath = false;
+    let taskId = null;
+    
+    // First pass: check if this message block contains a task path
+    for (const f of fields(buf, start, end)) {
+      if (f.wt === 2) {
+        const val = str(buf, f);
+        const tMatch = val.match(/tasks\/([0-9a-f-]{36})/i);
+        if (tMatch) {
+          hasTaskPath = true;
+          taskId = tMatch[1].toLowerCase();
+          break;
+        }
+      }
     }
 
-    const { targetXp, doneXp } = getXpData(pm, pkgBytes);
-    let percent = 0;
-    if (targetXp && targetXp > 0 && doneXp != null) {
-      percent = Math.min(100, Math.round((doneXp / targetXp) * 100));
+    // If this block is a task object, extract its details
+    if (hasTaskPath && taskId && !seen.has(taskId)) {
+      seen.add(taskId);
+      
+      let title = 'Task';
+      let total = 10, done = 0;
+      
+      // Second pass: extract tags 2 (title), 6 (total), 7 (done) from this SAME message block
+      for (const f of fields(buf, start, end)) {
+        if (f.tag === 2 && f.wt === 2) {
+          title = str(buf, f).trim();
+        } else if (f.tag === 6 && f.wt === 0) {
+          total = Number(readVarint(buf, f.payloadStart).value) || 10;
+        } else if (f.tag === 7 && f.wt === 0) {
+          done = Number(readVarint(buf, f.payloadStart).value) || 0;
+        }
+      }
+
+      // Fallback title search if tag 2 wasn't descriptive
+      if (title === 'Task' || title.length < 5) {
+        for (const f of fields(buf, start, end)) {
+          if (f.wt === 2) {
+            const val = str(buf, f);
+            if (val.length > 5 && (val.startsWith('Task') || val.startsWith('Flashcards') || val.startsWith('Times Tables') || val.includes('Question') || val.includes('Practice'))) {
+              title = val;
+              break;
+            }
+          }
+        }
+      }
+
+      tasks.push({
+        taskId,
+        title,
+        isFlashcards: /flash\s*cards?/i.test(title),
+        isTimesTables: /times\s*tables/i.test(title),
+        hasBookworkCheck: !/flash\s*cards?/i.test(title) && !/times\s*tables/i.test(title),
+        accuracy: total > 0 ? Math.round((done / total) * 100) + '%' : '0%'
+      });
     }
 
-    packages.push({ packageId, title, dueText, accuracy: percent + '%', tasks: [] });
-  }
-  return packages;
-}
-
-export function parseGetPackage(buffer) {
-  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) return null;
-  const raw = unframe(buffer);
-  
-  // DIAGNOSTIC: Print raw string snippet
-  const rawStr = raw.toString('utf8');
-  const taskMatch = rawStr.match(/tasks\/[0-9a-f-]{36}/gi);
-  if (taskMatch) {
-    console.log('[sparx] DIAGNOSTIC: Found tasks in GetPackage raw buffer:', [...new Set(taskMatch)].slice(0, 3));
-  } else {
-    console.log('[sparx] DIAGNOSTIC: No tasks in GetPackage raw buffer. Snippet:', rawStr.slice(0, 1500).replace(/[\x00-\x1F]/g, '?'));
+    // Recurse into all nested message blocks
+    for (const f of fields(buf, start, end)) {
+      if (f.wt === 2) {
+        processMessage(buf, f.payloadStart, f.payloadEnd);
+      }
+    }
   }
 
-  const top = byTag(raw, 0, raw.length);
-  const f = (top.get(1) || [])[0];
-  if (!f) return null;
-  const pkgBytes = sub(raw, f);
-  const pm = byTag(pkgBytes, 0, pkgBytes.length);
-
-  const pathF = (pm.get(1) || [])[0];
-  if (!pathF) return null;
-  const pkgMatch = str(pkgBytes, pathF).match(/packages\/([0-9a-f-]{36})/i);
-  if (!pkgMatch) return null;
-  const packageId = pkgMatch[1].toLowerCase();
-
-  let title = 'Homework';
-  const titleF = (pm.get(2) || [])[0];
-  if (titleF) {
-    const t = str(pkgBytes, titleF).trim();
-    const match = t.match(/^(.+?)\s+due\s+(.+)$/i);
-    if (match) title = match[1].trim(); else title = t;
-  }
-
-  let dueDate = null;
-  const dueField = (pm.get(9) || [])[0];
-  if (dueField) {
-    const d = timestampFromField(pkgBytes, dueField);
-    if (d) dueDate = d.toISOString();
-  }
-
-  const { targetXp, doneXp } = getXpData(pm, pkgBytes);
-  let percent = 0;
-  if (targetXp && targetXp > 0 && doneXp != null) {
-    percent = Math.min(100, Math.round((doneXp / targetXp) * 100));
-  }
-
-  return { packageId, title, dueDate, accuracy: percent + '%', tasks: [] };
+  processMessage(pkgBytes, 0, pkgBytes.length);
+  return tasks;
 }
 
 export function parseSparxQuestion(buffer) {
@@ -234,4 +211,83 @@ export function parseBookworkCode(buffer) {
   const s = unframe(buffer).toString('utf8');
   const m = s.match(/<choice>(.*?)<\/choice>/) || s.match(/<number>(.*?)<\/number>/);
   return m ? m[1] : null;
+}
+
+export function parseHomeworkList(buffer) {
+  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) return [];
+  const raw = unframe(buffer);
+  const packages = [];
+  const seen = new Set();
+  const top = byTag(raw, 0, raw.length);
+
+  for (const f of top.get(1) || []) {
+    const pkgBytes = sub(raw, f);
+    const pm = byTag(pkgBytes, 0, pkgBytes.length);
+    const pathF = (pm.get(1) || [])[0];
+    if (!pathF) continue;
+    const pkgMatch = str(pkgBytes, pathF).match(/packages\/([0-9a-f-]{36})/i);
+    if (!pkgMatch) continue;
+    const packageId = pkgMatch[1].toLowerCase();
+    if (seen.has(packageId)) continue;
+    seen.add(packageId);
+
+    let title = 'Homework', dueText = null;
+    const titleF = (pm.get(2) || [])[0];
+    if (titleF) {
+      const t = str(pkgBytes, titleF).trim();
+      const match = t.match(/^(.+?)\s+due\s+(.+)$/i);
+      if (match) { title = match[1].trim(); dueText = match[2].trim(); }
+      else title = t;
+    }
+
+    const { targetXp, doneXp } = getXpData(pm, pkgBytes);
+    let percent = 0;
+    if (targetXp && targetXp > 0 && doneXp != null) {
+      percent = Math.min(100, Math.round((doneXp / targetXp) * 100));
+    }
+
+    packages.push({ packageId, title, dueText, accuracy: percent + '%', tasks: [] });
+  }
+  return packages;
+}
+
+export function parseGetPackage(buffer) {
+  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) return null;
+  const raw = unframe(buffer);
+  const top = byTag(raw, 0, raw.length);
+
+  const f = (top.get(1) || [])[0];
+  if (!f) return null;
+  const pkgBytes = sub(raw, f);
+  const pm = byTag(pkgBytes, 0, pkgBytes.length);
+
+  const pathF = (pm.get(1) || [])[0];
+  if (!pathF) return null;
+  const pkgMatch = str(pkgBytes, pathF).match(/packages\/([0-9a-f-]{36})/i);
+  if (!pkgMatch) return null;
+  const packageId = pkgMatch[1].toLowerCase();
+
+  let title = 'Homework';
+  const titleF = (pm.get(2) || [])[0];
+  if (titleF) {
+    const t = str(pkgBytes, titleF).trim();
+    const match = t.match(/^(.+?)\s+due\s+(.+)$/i);
+    if (match) title = match[1].trim(); else title = t;
+  }
+
+  let dueDate = null;
+  const dueField = (pm.get(9) || [])[0];
+  if (dueField) {
+    const d = timestampFromField(pkgBytes, dueField);
+    if (d) dueDate = d.toISOString();
+  }
+
+  const { targetXp, doneXp } = getXpData(pm, pkgBytes);
+  let percent = 0;
+  if (targetXp && targetXp > 0 && doneXp != null) {
+    percent = Math.min(100, Math.round((doneXp / targetXp) * 100));
+  }
+
+  const tasks = extractTasksFromBytes(pkgBytes);
+  return { packageId, title, dueDate, accuracy: percent + '%', tasks };
 }
