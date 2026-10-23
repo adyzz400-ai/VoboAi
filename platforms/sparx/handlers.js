@@ -98,10 +98,8 @@ export const sparxHandlers = {
                     pkg.dueDate = detailed.dueDate || pkg.dueDate;
                     pkg.title = detailed.title || pkg.title;
                     pkg.accuracy = detailed.accuracy || pkg.accuracy;
+                    pkg.tasks = detailed.tasks || []; // NOW POPULATED CORRECTLY
                   }
-                  
-                  // TEMPORARY: Tasks array remains empty until diagnostic logs reveal the correct endpoint
-                  pkg.tasks = []; 
                 } catch (err) {
                   warn(`[sparx] GetPackage ${pkg.packageId} failed: ${err.message}`);
                   pkg.tasks = [];
