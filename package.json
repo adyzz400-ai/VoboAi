@@ -1,25 +1,52 @@
 {
-  "name": "vobo-ai",
-  "version": "0.1.0",
-  "private": true,
+ ).
+
+```json
+{
+  "name": " "name": "vobo-aivobo-ai",
+  "",
+  "version": "0version": "0.1.0",
+  ".1.0",
+  "private": true,private": true,
+  "type
   "type": "module",
-  "engines": {
+  "eng": "module",ines": {
+
+  "eng    "node": ">=20"
+  },ines": {
     "node": ">=20"
   },
   "scripts": {
-    "start": "node index.js",
-    "deploy:commands": "node scripts/deployCommands.js"
+   
+  "scripts": {
+    "start": "node index.js", "start": "node index.js",
+    "deploy
+    "deploy:commands": ":commands": "node scripts/deploynode scripts/deployCommands.js"
   },
+ Commands.js"
+ "dependencies": {  },
   "dependencies": {
-    "@google/generative-ai": "0.21.0",
-    "@napi-rs/canvas": "0.1.60",
-    "@supabase/supabase-js": "2.45.4",
-    "axios": "1.7.7",
-    "discord.js": "^14.16.3",
+    "@google/generative-ai
+    "@google/generative-ai": "0.21.0": "0.21.0",
+    "@napi-rs",
+    "@napi-rs/canvas": "/canvas": "0.1.0.1.60",
+    "@spartic60",
+    "@sparticuz/chromium": "^131uz/chromium": "^131.0.0",
+    "@.0.0",
+    "@supabase/supabase-js": "supabase/supabase-js": "2.45.4",
+2.45.4",
+    "axios":    "axios": "1.7 "1.7.7",
+.7",
+    "discord.js    "discord.js": "^14": "^14.16..16.3",
+    "dotenv": "3",
     "dotenv": "16.4.5",
-    "pdfkit": "0.15.0",
-    "puppeteer": "23.11.1",
-    "puppeteer-extra": "3.3.6",
-    "puppeteer-extra-plugin-stealth": "2.11.2"
+16.4.5",
+    "pdfkit": "0.    "pdfkit": "0.15.015.0",
+    "",
+    "puppeteer-core": "^23puppeteer-core": "^23.11.1",
+   .11. "puppeteer1",
+    "puppeteer-extra": "3-extra": "3.3.6.3.6",
+    "",
+    "puppeteer-extrapuppeteer-extra-plugin-stealth":-plugin-stealth": "2.11.2" "2.11.2"
   }
 }
