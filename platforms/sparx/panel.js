@@ -1,6 +1,12 @@
 // language: JavaScript (ESM), file: platforms/sparx/panel.js
-import { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder } from 'discord.js';
-import { getPlatform } from '../../hub/sessionStore.js';
+import {
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  StringSelectMenuBuilder,
+} from 'discord.js';
+import { getPlatform, getTheme } from '../../hub/sessionStore.js';
 
 export function buildPanel({ interaction }) {
   const session = getPlatform(interaction.user.id, 'sparx');
