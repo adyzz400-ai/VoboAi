@@ -41,7 +41,7 @@ export const sparxHandlers = {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const status = async function (line) {
-      const embed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Sparx' }).setDescription('Logging in — this panel updates live.').addFields({ name: 'Status', value: line });
+      const embed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Sparx' }).setDescription('Logging in...').addFields({ name: 'Status', value: line });
       await interaction.editReply({ embeds: [embed] }).catch(() => {});
     };
 
@@ -58,58 +58,46 @@ export const sparxHandlers = {
             cookie: session.cookie, browser: session.browser, page: session.page,
             jwtExpUnix: Math.floor(Date.now() / 1000) + 3600,
             waits: { min: config.waits.min, max: config.waits.max },
-            selectedTaskId: null, tasks: null, startedAt: Date.now()
+            selectedHomework: null, homeworks: null, startedAt: Date.now()
           });
 
-          await status('fetching tasks');
+          await status('fetching homeworks');
           try {
             const client = new SparxClient(session);
             const listBuffer = await client.getHomeworkList();
 
             if (!listBuffer || !Buffer.isBuffer(listBuffer)) {
               warn('[sparx] ListStudentPackages returned non-buffer');
-              patchPlatform(interaction.user.id, 'sparx', { tasks: [] });
+              patchPlatform(interaction.user.id, 'sparx', { homeworks: [] });
             } else {
               log('[sparx] list buffer bytes=' + listBuffer.length);
-              const baseList = parseHomeworkList(listBuffer);
-              const homeworkList = [];
-              let totalTasks = 0;
-
-              for (const pkg of baseList) {
-                let taskCounter = 1; // FIXED: Reset counter for each package
+              const homeworks = parseHomeworkList(listBuffer);
+              
+              // Fetch details for each homework
+              for (const hw of homeworks) {
                 try {
-                  const pkgBuffer = await client.getPackage(pkg.packageId);
+                  const pkgBuffer = await client.getPackage(hw.packageId);
                   const detailed = parseGetPackage(pkgBuffer);
                   if (detailed) {
-                    pkg.dueDate = detailed.dueDate || pkg.dueDate;
-                    pkg.title = detailed.title || pkg.title;
-                    pkg.accuracy = detailed.accuracy || pkg.accuracy;
-                    pkg.tasks = detailed.tasks || [];
-
-                    pkg.tasks.forEach(t => {
-                      if (t.title === 'Homework' || t.title === 'Task' || t.title.length < 5) {
-                        t.title = 'Task ' + taskCounter;
-                      }
-                      taskCounter++;
-                    });
-
-                    if (!pkg.accuracy || pkg.accuracy === '0%') {
-                      const completed = pkg.tasks.filter(t => (t.done || 0) >= (t.total || 10)).length;
-                      const pct = pkg.tasks.length > 0 ? Math.round((completed / pkg.tasks.length) * 100) : 0;
-                      pkg.accuracy = pct + '%';
-                    }
+                    hw.dueDate = detailed.dueDate || hw.dueDate;
+                    hw.title = detailed.title || hw.title;
+                    hw.accuracy = detailed.accuracy || hw.accuracy;
+                    hw.totalTasks = detailed.tasks ? detailed.tasks.length : 0;
                   }
-                } catch (err) { warn(`[sparx] GetPackage ${pkg.packageId} failed: ${err.message}`); pkg.tasks = []; }
-                totalTasks += pkg.tasks.length;
-                homeworkList.push(pkg);
+                } catch (err) { 
+                  warn(`[sparx] GetPackage ${hw.packageId} failed: ${err.message}`); 
+                }
               }
 
-              log('[sparx] packages=' + homeworkList.length + ' tasks=' + totalTasks);
-              patchPlatform(interaction.user.id, 'sparx', { tasks: homeworkList });
+              log('[sparx] homeworks=' + homeworks.length);
+              patchPlatform(interaction.user.id, 'sparx', { homeworks });
             }
-          } catch (err) { warn('[sparx] task list failed: ' + err.message); patchPlatform(interaction.user.id, 'sparx', { tasks: [] }); }
+          } catch (err) { 
+            warn('[sparx] homework list failed: ' + err.message); 
+            patchPlatform(interaction.user.id, 'sparx', { homeworks: [] }); 
+          }
 
-          const panel = await buildPanel({ interaction: interaction });
+          const panel = await buildPanel({ interaction });
           await interaction.editReply({ embeds: [panel.embed], components: panel.components });
         } catch (err) {
           log('[sparx] login error: ' + err.message);
@@ -132,7 +120,7 @@ export const sparxHandlers = {
     }
     patchPlatform(interaction.user.id, 'sparx', { waits: { min, max } });
     await interaction.deferUpdate();
-    const panel = await buildPanel({ interaction: interaction });
+    const panel = await buildPanel({ interaction });
     await interaction.editReply({ embeds: [panel.embed], components: panel.components });
   },
 
@@ -146,17 +134,17 @@ export const sparxHandlers = {
       const embed = new EmbedBuilder().setColor(0xed4245).setDescription('Invalid wait window.');
       return interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed] });
     }
-    patchPlatform(interaction.user.id, 'sparx', { waits: { min, max }, model: model });
+    patchPlatform(interaction.user.id, 'sparx', { waits: { min, max }, model });
     await interaction.deferUpdate();
-    const panel = await buildPanel({ interaction: interaction });
+    const panel = await buildPanel({ interaction });
     await interaction.editReply({ embeds: [panel.embed], components: panel.components });
   },
 
-  async 'sparx:task'(interaction) {
-    const taskId = interaction.values[0];
-    patchPlatform(interaction.user.id, 'sparx', { selectedTaskId: taskId });
+  async 'sparx:homework'(interaction) {
+    const hwId = interaction.values[0];
+    patchPlatform(interaction.user.id, 'sparx', { selectedHomework: hwId });
     await interaction.deferUpdate();
-    const panel = await buildPanel({ interaction: interaction });
+    const panel = await buildPanel({ interaction });
     await interaction.editReply({ embeds: [panel.embed], components: panel.components });
   },
 
@@ -166,10 +154,10 @@ export const sparxHandlers = {
     const accent = accentFor(userId);
 
     if (!session?.jwt) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Session expired. Re-login.' });
-    if (!session.selectedTaskId) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Pick a homework from the dropdown first.' });
+    if (!session.selectedHomework) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Select a homework first.' });
 
-    const homework = (session.tasks || []).find((t) => String(t.packageId) === String(session.selectedTaskId));
-    if (!homework) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Selected homework not found.' });
+    const homework = (session.homeworks || []).find(h => h.packageId === session.selectedHomework);
+    if (!homework) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Homework not found.' });
 
     const ackEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Sparx' }).setDescription('📥 Opening DM. Progress will stream there.');
     await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [ackEmbed] });
@@ -177,30 +165,30 @@ export const sparxHandlers = {
     let progressMsg;
     try {
       const dmChannel = await interaction.user.createDM();
-      const dmEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Sparx' }).setDescription('⏳ Waiting for queue slot…');
+      const dmEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Sparx' }).setDescription('⏳ Starting homework...');
       progressMsg = await dmChannel.send({ embeds: [dmEmbed] });
     } catch (err) { return interaction.editReply({ content: 'Could not open DMs.' }); }
 
     const signal = { cancelled: false };
     const task = new Task({
-      userId: userId, kind: 'run', timeoutMs: 60 * 60 * 1000,
+      userId, kind: 'run', timeoutMs: 60 * 60 * 1000,
       run: async function () {
         try {
           const summary = await runSparxPackage({
-            session: session, packageId: homework.packageId, homework: homework,
+            session, packageId: homework.packageId, homework,
             interaction: { editReply: (opts) => progressMsg.edit(opts) },
-            signal: signal, onLog: (txt) => log('[sparx] ' + txt)
+            signal, onLog: (txt) => log('[sparx] ' + txt)
           });
 
           if (summary.cancelled) {
-            const cancelEmbed = new EmbedBuilder().setColor(0xeab308).setAuthor({ name: 'Vobo AI · Cancelled' }).setDescription('Automation stopped by user.\n**Correct so far**: ' + summary.totalCorrect + '\n**Questions completed**: ' + summary.questionsCompleted);
+            const cancelEmbed = new EmbedBuilder().setColor(0xeab308).setAuthor({ name: 'Vobo AI · Cancelled' }).setDescription('Stopped by user.\n**Correct**: ' + summary.totalCorrect);
             await progressMsg.edit({ embeds: [cancelEmbed], components: [] });
           } else if (summary.success) {
-            const finalEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Homework complete' }).setDescription('Finished all tasks in the homework!\nTotal correct: ' + summary.totalCorrect);
+            const finalEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Complete' }).setDescription('✅ Homework finished!\n**Total correct**: ' + summary.totalCorrect);
             await progressMsg.edit({ embeds: [finalEmbed], components: [] });
           } else {
-            const failLines = (summary.failedTasks || []).map((t) => `• **${t.title}** — ${t.error}`).join('\n') || '• (no tasks ran)';
-            const partialEmbed = new EmbedBuilder().setColor(0xed4245).setAuthor({ name: 'Vobo AI · Homework incomplete' }).setDescription(`Some tasks did not complete.\n**Correct so far**: ${summary.totalCorrect}\n**Questions completed**: ${summary.questionsCompleted}\n\n**Failures**\n${failLines}`);
+            const failLines = (summary.failedTasks || []).map(t => `• **${t.title}** — ${t.error}`).join('\n') || '• (no tasks ran)';
+            const partialEmbed = new EmbedBuilder().setColor(0xed4245).setAuthor({ name: 'Vobo AI · Incomplete' }).setDescription(`**Correct**: ${summary.totalCorrect}\n\n**Failures**\n${failLines}`);
             await progressMsg.edit({ embeds: [partialEmbed], components: [] });
           }
         } catch (e) {
