@@ -65,14 +65,6 @@ export class SparxClient {
     return this.request('/maths/sparx.packageactivity.v1.Packages/GetPackage', Buffer.concat([Buffer.from([0x0a, path.length]), Buffer.from(path)]));
   }
 
-  async listTasks(packageId) {
-    const pathStr = 'packages/' + packageId;
-    return this.request('/maths/sparx.packageactivity.v1.Packages/ListTasks', Buffer.concat([
-      Buffer.from([0x0a, pathStr.length]),
-      Buffer.from(pathStr)
-    ]));
-  }
-
   async getActivity(packageId, taskId, itemNumber) {
     const pathStr = 'packages/' + packageId + '/tasks/' + taskId + '/items/' + itemNumber;
     return this.request('/maths/sparx.packageactivity.v1.Activities/GetActivity', Buffer.concat([Buffer.from([0x12, pathStr.length]), Buffer.from(pathStr)]));
