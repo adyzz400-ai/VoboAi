@@ -15,10 +15,9 @@ export class SparxClient {
 
     const authHeader = this.session.jwt.startsWith('bearer ') ? this.session.jwt : 'bearer ' + this.session.jwt;
 
-    let fullPath = path;
-    if (path.includes('ActivityAction') || path.includes('GetActivity')) {
-      fullPath = path.replace('packageactivity.v1.Activities', 'swworker.v1.Sparxweb');
-    }
+    // REMOVED: The swworker rewrite that was causing "unknown service" errors.
+    // We now use the path exactly as provided by the caller.
+    const fullPath = path;
 
     log('[sparx] POST ' + fullPath + ' frameHex=' + frame.toString('hex').slice(0, 60));
 
@@ -67,6 +66,7 @@ export class SparxClient {
 
   async getActivity(packageId, taskId, itemNumber) {
     const pathStr = 'packages/' + packageId + '/tasks/' + taskId + '/items/' + itemNumber;
+    // This now correctly hits sparx.packageactivity.v1.Activities/GetActivity
     return this.request('/maths/sparx.packageactivity.v1.Activities/GetActivity', Buffer.concat([Buffer.from([0x12, pathStr.length]), Buffer.from(pathStr)]));
   }
 
