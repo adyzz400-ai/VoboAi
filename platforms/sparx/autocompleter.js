@@ -1,5 +1,5 @@
 // language: JavaScript (ESM), file: platforms/sparx/autocompleter.js
-import { EmbedBuilder, AttachmentBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { log, warn } from '../../utils/logger.js';
 import { sleep } from '../../utils/formatTime.js';
 import { getAIanswer } from '../educake/getAIanswer.js';
@@ -25,7 +25,7 @@ function humanDelay(minMs, maxMs, isFirstQuestion = false) {
 
 function cancelRow() {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('sparx:cancel').setLabel('Cancel').setStyle(ButtonStyle.Danger)
+    new ButtonBuilder().setCustomId('sparx:cancel').setLabel('Cancel Task').setStyle(ButtonStyle.Danger).setEmoji('❌')
   );
 }
 
@@ -53,7 +53,7 @@ function validateAnswer(ai, parsed) {
     if (!match) {
       const fuzzy = choices.find(c => c.includes(answer.slice(0, 5)) || answer.includes(c.slice(0, 5)));
       if (fuzzy) return { valid: true, answer: fuzzy, original: ai.answer };
-      return { valid: false, reason: `answer "${ai.answer}" not in choices: ${choices.join(', ')}` };
+      return { valid: false, reason: `answer "${ai.answer}" not in choices` };
     }
     return { valid: true, answer: ai.answer };
   }
@@ -94,29 +94,30 @@ export async function runSparxPackage({ session, packageId, homework, interactio
 
   const taskProgress = {};
   homework.tasks.forEach((t) => {
-    // Use the actual total from the server, default to 10 if missing
     taskProgress[t.taskId] = { label: t.title, filled: 0, total: t.total || 10 };
   });
 
   const failedTasks = [];
   let totalCorrect = 0, questionsCompleted = 0;
-  // Calculate total questions based on actual server data
   const totalQuestions = homework.tasks.reduce((sum, t) => sum + (t.total || 10), 0);
   const startTime = Date.now();
   const { minMs, maxMs } = waitWindow(session);
+
+  // Send initial embed once
+  await updateUI(interaction, taskProgress, homework, 'Starting...', '', questionsCompleted, totalQuestions, totalCorrect, startTime, null);
 
   try {
     for (let i = 0; i < homework.tasks.length; i++) {
       if (signal.cancelled) break;
       const task = homework.tasks[i];
-      const taskTotal = task.total || 10; // Use server-provided total
-      
+      const taskTotal = task.total || 10;
+
       onLog('Starting ' + task.title + '...');
 
-      // --- Times tables: fast path (no wait, as requested) ---
+      // --- Times tables: fast path, NO wait ---
       if (task.isTimesTables) {
         let ttCorrect = 0;
-        for (let q = 0; q < taskTotal; q++) { // Loop exactly taskTotal times
+        for (let q = 0; q < taskTotal; q++) {
           if (signal.cancelled) break;
           const a = Math.floor(Math.random() * 12) + 1;
           const b = Math.floor(Math.random() * 12) + 1;
@@ -138,9 +139,8 @@ export async function runSparxPackage({ session, packageId, homework, interactio
         continue;
       }
 
-      // --- Standard task with wait before answering ---
+      // --- Standard task ---
       try {
-        // Bookwork bypass
         try {
           const bwBuffer = await client.getBookworkCheck(packageId, task.taskId);
           const bwCode = parseBookworkCode(bwBuffer);
@@ -150,13 +150,12 @@ export async function runSparxPackage({ session, packageId, homework, interactio
             onLog('Bookwork bypass: ' + bwCode);
           }
         } catch (err) {
-          // Ignore bookwork errors (e.g. "not enabled")
+          // Ignore bookwork errors
         }
 
         let item = 1;
         let buffer = await client.getActivity(packageId, task.taskId, item);
         let taskCorrect = 0;
-        const maxRetries = 3;
 
         while (!signal.cancelled && item <= taskTotal) {
           let parsed;
@@ -166,15 +165,19 @@ export async function runSparxPackage({ session, packageId, homework, interactio
             warn('[sparx] parse failed on item ' + item + ': ' + err.message);
             break;
           }
-          
+
           const { prompt, choices, activityId, type } = parsed;
-          if (!activityId) {
-            log('[sparx] no activityId — task complete or malformed response');
+
+          // Validate activityId is a proper UUID
+          if (!activityId || !/^[0-9a-f-]{36}$/i.test(activityId)) {
+            warn('[sparx] Invalid activityId: ' + activityId);
             break;
           }
 
           taskProgress[task.taskId].filled = item - 1;
           questionsCompleted = homework.tasks.slice(0, i).reduce((s, t) => s + (t.total || 10), 0) + (item - 1);
+
+          // Update UI WITHOUT countdown (no flicker)
           await updateUI(interaction, taskProgress, homework, task.title, prompt, questionsCompleted, totalQuestions, totalCorrect + taskCorrect, startTime, '🤖 Thinking…');
 
           await client.readyQuestion(activityId).catch(() => {});
@@ -190,10 +193,11 @@ export async function runSparxPackage({ session, packageId, homework, interactio
           let components = [];
           let eliminatedChoices = [];
           let retries = 0;
+          let answerResolved = false;
 
-          while (retries < maxRetries) {
+          while (retries < 3) {
             const validation = validateAnswer(ai, parsed);
-            
+
             if (validation.valid) {
               if (type === 'number') {
                 components = parsed.numberFields.map(f => ({ key: f.ref, value: String(validation.answers[f.ref] || '0') }));
@@ -205,27 +209,27 @@ export async function runSparxPackage({ session, packageId, homework, interactio
                 const slotMsg = Buffer.concat([Buffer.from([0x0a, slot.ref.length]), Buffer.from(slot.ref)]);
                 const inner = Buffer.concat([Buffer.from([0x0a, slotMsg.length]), slotMsg, Buffer.from([0x12, card.ref.length]), Buffer.from(card.ref)]);
                 buffer = await client.request('/maths/sparx.packageactivity.v1.Activities/ActivityAction', Buffer.concat([Buffer.from([0x0a, activityId.length+11]), Buffer.from('/activities/'+activityId), Buffer.from([0x12, inner.length]), inner]));
-                taskCorrect++; item++; 
+                taskCorrect++; item++;
                 await sleep(humanDelay(minMs, maxMs, item === 2));
-                continue;
+                answerResolved = true;
+                break;
               } else {
                 const chosen = choices.find(c => c.text.trim().toLowerCase() === ai.answer.trim().toLowerCase()) || choices[0];
                 components = [{ key: chosen.ref, value: chosen.text }];
               }
+              answerResolved = true;
               break;
             }
 
             retries++;
             warn(`[sparx] answer validation failed (attempt ${retries}): ${validation.reason}`);
-            onLog(`Retry ${retries}/${maxRetries} — eliminating wrong answer`);
-            
+
             if (type === 'multiple' || type === 'slot') {
               eliminatedChoices.push(ai.answer);
               const retryResult = await retryWithElimination({ parsed, session, eliminatedChoices });
               if (!retryResult) break;
               ai = retryResult.ai;
-              const chosen = retryResult.chosen;
-              components = [{ key: chosen.ref, value: chosen.text }];
+              components = [{ key: retryResult.chosen.ref, value: retryResult.chosen.text }];
             } else {
               ai = await getAIanswer(
                 { kind: type === 'number' ? 'number' : 'short_answer', prompt: cleanPrompt, choices: cleanChoices, image: parsed.image || null, fields: parsed.numberFields || parsed.textFields },
@@ -234,14 +238,18 @@ export async function runSparxPackage({ session, packageId, homework, interactio
             }
           }
 
-          // WAIT BEFORE ANSWERING (Human-like delay)
-          const waitMs = humanDelay(minMs, maxMs, item === 1);
-          let waited = 0;
-          while (waited < waitMs) {
-            if (signal.cancelled) break;
-            await sleep(1000); waited += 1000;
-            await updateUI(interaction, taskProgress, homework, task.title, prompt, questionsCompleted, totalQuestions, totalCorrect + taskCorrect, startTime, '⏳ Waiting **' + Math.ceil((waitMs - waited) / 1000) + 's**…');
+          // If AI completely failed after retries, SKIP this question (don't infinite loop)
+          if (!answerResolved) {
+            warn('[sparx] AI failed to resolve answer, skipping question ' + item);
+            onLog('Skipped question ' + item + ' (AI failed)');
+            item++;
+            continue;
           }
+
+          // Human-like wait BEFORE submitting (no countdown shown to avoid flicker)
+          const waitMs = humanDelay(minMs, maxMs, item === 1);
+          await sleep(waitMs);
+
           if (signal.cancelled) break;
 
           let responseBuffer;
@@ -253,16 +261,15 @@ export async function runSparxPackage({ session, packageId, homework, interactio
           }
 
           if (responseBuffer && responseBuffer.length > 5000) {
-            onLog('Wrong answer on ' + task.title + ' item ' + item + '. Retrying...');
+            onLog('Wrong answer on ' + task.title + ' item ' + item + '. Continuing...');
             try {
               const cont = parseSparxQuestion(responseBuffer);
-              if (cont.activityId) {
+              if (cont.activityId && /^[0-9a-f-]{36}$/i.test(cont.activityId)) {
                 buffer = await client.continueActivity(cont.activityId);
               } else {
                 item++;
               }
             } catch (e) {
-              warn('[sparx] continue failed: ' + e.message);
               item++;
             }
           } else {
@@ -288,16 +295,21 @@ export async function runSparxPackage({ session, packageId, homework, interactio
     clearInterval(keepalive);
   }
 
+  // Final UI update
+  await updateUI(interaction, taskProgress, homework, 'Finished', '', questionsCompleted, totalQuestions, totalCorrect, startTime, null);
+
   return { success: !signal.cancelled && failedTasks.length === 0 && questionsCompleted > 0, cancelled: !!signal.cancelled, totalCorrect, questionsCompleted, failedTasks };
 }
 
 async function updateUI(interaction, progress, homework, currentTaskName, questionText, qCompleted, qTotal, score, startTime, statusText) {
-  const barBuf = renderMultiBar({ bars: Object.values(progress), accent: '#0A78FF', labelWidth: 160 });
-  const file = new AttachmentBuilder(barBuf, { name: 'progress.png' });
   const mins = Math.floor((Date.now() - startTime) / 60000);
   const secs = Math.floor(((Date.now() - startTime) % 60000) / 1000);
-  const dueStr = homework.dueDate ? new Date(homework.dueDate).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : '—';
-  
+  const dueStr = homework.dueDate ? new Date(homework.dueDate).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }) : '—';
+
+  const barBuf = renderMultiBar({ bars: Object.values(progress), accent: '#0A78FF', labelWidth: 140 });
+  const { AttachmentBuilder } = await import('discord.js');
+  const file = new AttachmentBuilder(barBuf, { name: 'progress.png' });
+
   const embed = new EmbedBuilder()
     .setColor(0x0a78ff)
     .setAuthor({ name: 'Vobo AI · Sparx Maths' })
@@ -310,7 +322,8 @@ async function updateUI(interaction, progress, homework, currentTaskName, questi
       '**Questions Completed**: ' + qCompleted + '/' + qTotal + '\n' +
       '**Time spent**: ' + mins + 'm ' + secs + 's\n' +
       '**Score so far**: ' + score + ' correct'
-    ).setImage('attachment://progress.png');
+    )
+    .setImage('attachment://progress.png');
 
   await interaction.editReply({ embeds: [embed], files: [file], components: [cancelRow()] }).catch(() => {});
 }
