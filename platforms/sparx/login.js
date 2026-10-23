@@ -12,11 +12,26 @@ export async function sparxLogin({ school, username, password, onStatus }) {
   step('launching browser');
   let browser, page;
   try {
-    browser = await puppeteerExtra.launch({
-      executablePath: config.chromePath,
+    const launchOptions = {
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
-    });
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins,site-per-process'
+      ]
+    };
+
+    // Allow override via .env, otherwise fallback to config. 
+    // If empty, omit entirely so Puppeteer finds the host's default binary.
+    const execPath = process.env.PUPPETEER_EXECUTABLE_PATH || config.chromePath;
+    if (execPath && execPath.trim() !== '') {
+      launchOptions.executablePath = execPath;
+    }
+
+    browser = await puppeteerExtra.launch(launchOptions);
     page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
