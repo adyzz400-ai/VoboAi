@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20 <21" },
+    "engines": {
+    "node": ">=20"
+  },
+
   "scripts": {
     "start": "node index.js",
     "deploy:commands": "node scripts/deployCommands.js"
