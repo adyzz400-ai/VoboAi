@@ -234,31 +234,44 @@ export function parseHomeworkList(buffer) {
 }
 
 export function parseGetPackage(buffer) {
-  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) return null;
+  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) {
+    console.log('[sparx-debug-getpackage] FAILED: buffer is empty or not a buffer');
+    return null;
+  }
   const raw = unframe(buffer);
   const top = byTag(raw, 0, raw.length);
 
   const f = (top.get(1) || [])[0];
-  if (!f) return null;
+  if (!f) {
+    console.log('[sparx-debug-getpackage] FAILED: missing field 1');
+    return null;
+  }
   const pkgBytes = sub(raw, f);
   const pm = byTag(pkgBytes, 0, pkgBytes.length);
 
   const pathF = (pm.get(1) || [])[0];
-  if (!pathF) return null;
-  const pkgMatch = str(pkgBytes, pathF).match(/packages\/([0-9a-f-]+)/i);
-  if (!pkgMatch) return null;
+  if (!pathF) {
+    console.log('[sparx-debug-getpackage] FAILED: missing path field');
+    return null;
+  }
+  
+  const pathStr = str(pkgBytes, pathF);
+  const pkgMatch = pathStr.match(/packages\/([0-9a-f-]+)/i);
+  if (!pkgMatch) {
+    console.log('[sparx-debug-getpackage] FAILED: path did not match regex. Path was:', pathStr);
+    return null;
+  }
   const packageId = pkgMatch[1].toLowerCase();
 
   let title = 'Homework';
   const titleF = (pm.get(2) || [])[0];
   if (titleF) {
     const t = str(pkgBytes, titleF).trim();
-    
-    // DEBUG LOG FOR GETPACKAGE
-    console.log(`[sparx-debug-getpackage] Raw title string for ${packageId}:`, t);
-    
+    console.log(`[sparx-debug-getpackage] SUCCESS: Raw title string for ${packageId}:`, t);
     const match = t.match(/^(.+?)\s+due\s+(.+)$/i);
     if (match) title = match[1].trim(); else title = t;
+  } else {
+    console.log(`[sparx-debug-getpackage] WARNING: missing field 2 (title) for ${packageId}. Available tags:`, Array.from(pm.keys()));
   }
 
   let dueDate = null;
