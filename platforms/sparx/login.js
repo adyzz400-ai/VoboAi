@@ -1,6 +1,7 @@
 // language: JavaScript (ESM), file: platforms/sparx/login.js
 import puppeteerExtra from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import chromium from '@sparticuz/chromium';
 import { log } from '../../utils/logger.js';
 
 puppeteerExtra.use(StealthPlugin());
@@ -11,17 +12,12 @@ export async function sparxLogin({ school, username, password, onStatus }) {
   step('launching browser');
   let browser, page;
   try {
-    // Clean, container-safe launch options. No hardcoded paths needed.
+    // Launch using the bundled Chromium binary (bypasses host postinstall blocks)
     browser = await puppeteerExtra.launch({
-      headless: 'new',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-web-security',
-        '--disable-features=IsolateOrigins,site-per-process'
-      ]
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
     });
     
     page = await browser.newPage();
