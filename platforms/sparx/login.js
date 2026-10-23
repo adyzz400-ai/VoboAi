@@ -1,8 +1,6 @@
 // language: JavaScript (ESM), file: platforms/sparx/login.js
 import puppeteerExtra from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import fs from 'fs';
-import { config } from '../../utils/config.js';
 import { log } from '../../utils/logger.js';
 
 puppeteerExtra.use(StealthPlugin());
@@ -13,7 +11,8 @@ export async function sparxLogin({ school, username, password, onStatus }) {
   step('launching browser');
   let browser, page;
   try {
-    const launchOptions = {
+    // Clean, container-safe launch options. No hardcoded paths needed.
+    browser = await puppeteerExtra.launch({
       headless: 'new',
       args: [
         '--no-sandbox',
@@ -23,39 +22,8 @@ export async function sparxLogin({ school, username, password, onStatus }) {
         '--disable-web-security',
         '--disable-features=IsolateOrigins,site-per-process'
       ]
-    };
-
-    // 1. Check env or config, explicitly blocking the known bad path
-    const rawPath = process.env.PUPPETEER_EXECUTABLE_PATH || config.chromePath;
-    let validPath = rawPath && rawPath.trim() !== '' && rawPath !== '/usr/bin/chromium' 
-      ? rawPath 
-      : undefined;
-
-    // 2. If still undefined, scan for the actual browser binary on bot-hosting.net
-    if (!validPath) {
-      const commonPaths = [
-        '/usr/bin/google-chrome',
-        '/usr/bin/chromium-browser',
-        '/usr/bin/chromium' // Last resort, though we know it failed before
-      ];
-      for (const p of commonPaths) {
-        if (fs.existsSync(p)) {
-          validPath = p;
-          log(`[sparx-login] Auto-discovered browser at: ${validPath}`);
-          break;
-        }
-      }
-    }
-
-    // 3. Apply path or fallback to channel discovery
-    if (validPath) {
-      launchOptions.executablePath = validPath;
-    } else {
-      launchOptions.channel = 'chrome';
-      log('[sparx-login] No path found, falling back to channel: chrome');
-    }
-
-    browser = await puppeteerExtra.launch(launchOptions);
+    });
+    
     page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
