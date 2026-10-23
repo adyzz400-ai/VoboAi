@@ -81,113 +81,65 @@ function getXpData(pm, pkgBytes) {
 }
 
 export function extractTasksFromBytes(pkgBytes) {
+  // Kept as fallback, but tasks are now primarily fetched via ListTasks
+  return [];
+}
+
+export function parseTaskList(buffer) {
+  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) return [];
+  const raw = unframe(buffer);
   const tasks = [];
   const seen = new Set();
-  
-  // 1. RAW BUFFER FAILSAFE: Scan the entire buffer for UUIDs directly
-  const rawStr = pkgBytes.toString('utf8');
-  const uuidMatches = rawStr.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi);
-  if (uuidMatches) {
-    const uniqueUuids = [...new Set(uuidMatches)];
-    console.log(`[sparx] Raw buffer UUID scan found: ${uniqueUuids.slice(0, 5).join(', ')}...`);
-  } else {
-    console.log('[sparx] WARNING: No UUIDs found in raw buffer. Tasks may not be in GetPackage payload.');
-  }
+  const top = byTag(raw, 0, raw.length);
 
-  const pm = byTag(pkgBytes, 0, pkgBytes.length);
-  // Expanded candidate tags based on Sparx protobuf variations
-  const candidateTags = [11, 10, 12, 8, 3, 4];
+  for (const fieldNum of [1, 2]) {
+    for (const f of top.get(fieldNum) || []) {
+      const taskBytes = sub(raw, f);
+      const tm = byTag(taskBytes, 0, taskBytes.length);
 
-  for (const tagNum of candidateTags) {
-    const tagFields = pm.get(tagNum) || [];
-    if (tagFields.length === 0) continue;
-
-    for (const tf of tagFields) {
-      const tBytes = sub(pkgBytes, tf);
-      let tPath = null;
-
-      function findTaskPath(buf, start, end) {
-        for (const f of fields(buf, start, end)) {
-          if (f.wt === 2) {
-            const val = str(buf, f);
-            if (val.includes('tasks/') || val.match(/^[0-9a-f-]{36}$/i)) return val;
-            const res = findTaskPath(buf, f.payloadStart, f.payloadEnd);
-            if (res) return res;
-          }
-        }
-        return null;
+      const pathF = (tm.get(1) || [])[0];
+      let taskId = null;
+      if (pathF) {
+        const pathStr = str(taskBytes, pathF);
+        const taskMatch = pathStr.match(/tasks\/([0-9a-f-]{36})/i);
+        if (taskMatch) taskId = taskMatch[1].toLowerCase();
       }
 
-      tPath = findTaskPath(tBytes, 0, tBytes.length);
-
-      // Diagnostic dump if primary tag fails
-      if (!tPath && tagNum === 11 && tf === tagFields[0]) {
-        console.log(`[sparx] DEBUG: No task path in tag ${tagNum}. Dumping nested strings:`);
-        function dumpStrings(buf, start, end, depth = 0) {
-          for (const f of fields(buf, start, end)) {
-            if (f.wt === 2) {
-              const val = str(buf, f);
-              if (val.length > 0 && val.length < 150 && !/[\x00-\x08]/.test(val)) {
-                console.log(`[sparx]   ${' '.repeat(depth)}tag${f.tag}: "${val}"`);
-              }
-              dumpStrings(buf, f.payloadStart, f.payloadEnd, depth + 1);
-            }
-          }
-        }
-        dumpStrings(tBytes, 0, tBytes.length);
+      if (!taskId) {
+        const rawStr = taskBytes.toString('utf8');
+        const match = rawStr.match(/tasks\/([0-9a-f-]{36})/i) || rawStr.match(/([0-9a-f-]{36})/);
+        if (match) taskId = match[1].toLowerCase();
       }
-      
-      if (!tPath) continue;
 
-      const tMatch = tPath.match(/tasks\/([0-9a-f-]{36})/i) || tPath.match(/([0-9a-f-]{36})/i);
-      if (!tMatch) continue;
-      const taskId = tMatch[1].toLowerCase();
-      if (seen.has(taskId)) continue;
+      if (!taskId || seen.has(taskId)) continue;
       seen.add(taskId);
 
-      let taskTitle = 'Task';
-      function findTitle(buf, start, end) {
-        for (const f of fields(buf, start, end)) {
-          if (f.wt === 2) {
-            const val = str(buf, f);
-            if (val.length > 5 && (val.startsWith('Task') || val.startsWith('Flashcards') || val.startsWith('Times Tables') || val.includes('Question') || val.includes('Practice'))) return val;
-            const res = findTitle(buf, f.payloadStart, f.payloadEnd);
-            if (res) return res;
-          }
-        }
-        return null;
+      let title = 'Task';
+      const titleF = (tm.get(2) || [])[0];
+      if (titleF) {
+        title = str(taskBytes, titleF).trim();
       }
-      const foundTitle = findTitle(tBytes, 0, tBytes.length);
-      if (foundTitle) taskTitle = foundTitle;
 
       let total = 10, done = 0;
-      function findCounts(buf, start, end) {
-        for (const f of fields(buf, start, end)) {
-          if (f.wt === 0) {
-            const val = Number(readVarint(buf, f.payloadStart).value);
-            if (f.tag === 6) total = val;
-            if (f.tag === 7) done = val;
-          }
-          if (f.wt === 2) findCounts(buf, f.payloadStart, f.payloadEnd);
-        }
+      const totalF = (tm.get(6) || [])[0];
+      if (totalF && totalF.wt === 0) {
+        total = Number(readVarint(taskBytes, totalF.payloadStart).value) || 10;
       }
-      findCounts(tBytes, 0, tBytes.length);
+      const doneF = (tm.get(7) || [])[0];
+      if (doneF && doneF.wt === 0) {
+        done = Number(readVarint(taskBytes, doneF.payloadStart).value) || 0;
+      }
 
       tasks.push({
         taskId,
-        title: taskTitle,
-        isFlashcards: /flash\s*cards?/i.test(taskTitle),
-        isTimesTables: /times\s*tables/i.test(taskTitle),
-        hasBookworkCheck: !/flash\s*cards?/i.test(taskTitle) && !/times\s*tables/i.test(taskTitle),
+        title,
+        isFlashcards: /flash\s*cards?/i.test(title),
+        isTimesTables: /times\s*tables/i.test(title),
+        hasBookworkCheck: !/flash\s*cards?/i.test(title) && !/times\s*tables/i.test(title),
         accuracy: total > 0 ? Math.round((done / total) * 100) + '%' : '0%'
       });
     }
   }
-  
-  if (tasks.length === 0) {
-    console.log('[sparx] FINAL WARNING: extractTasksFromBytes returned 0 tasks. Check raw buffer scan above.');
-  }
-  
   return tasks;
 }
 
@@ -325,6 +277,5 @@ export function parseGetPackage(buffer) {
     percent = Math.min(100, Math.round((doneXp / targetXp) * 100));
   }
 
-  const tasks = extractTasksFromBytes(pkgBytes);
-  return { packageId, title, dueDate, accuracy: percent + '%', tasks };
+  return { packageId, title, dueDate, accuracy: percent + '%', tasks: [] };
 }
