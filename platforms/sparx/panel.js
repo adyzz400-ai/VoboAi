@@ -21,7 +21,6 @@ export function buildPanel({ interaction }) {
     .setColor(accent)
     .setAuthor({ name: 'Vobo AI · Sparx Maths' });
 
-  // 1. Handle unauthenticated state (was missing, causing the login button to vanish)
   if (!isLoggedIn) {
     embed.setDescription('**Not logged in.**\n\nConnect your Sparx Maths account to load homework and start automating.');
     
@@ -34,27 +33,34 @@ export function buildPanel({ interaction }) {
   } else {
     embed.setDescription('**Welcome to Sparx Automation**\n\nSelect a homework below to start.');
     
-    // 2. Match the actual key used by handlers.js and parser.js ('tasks', not 'homeworks')
-    if (session?.tasks && session.tasks.length > 0) {
+    // Check BOTH keys to guarantee the dropdown renders regardless of session state
+    const homeworkList = session?.tasks || session?.homeworks || [];
+    
+    if (homeworkList.length > 0) {
       const hwSelect = new StringSelectMenuBuilder()
-        .setCustomId('sparx:task') // 3. Match the actual handler name in handlers.js
+        .setCustomId('sparx:task') // Must match the handler in handlers.js to prevent timeout
         .setPlaceholder('Select homework...')
-        .addOptions(session.tasks.map(hw => ({
-          label: hw.title.length > 25 ? hw.title.slice(0, 22) + '...' : hw.title,
-          value: hw.packageId,
-          // 4. Use hw.tasks?.length for accurate task count from parser.js output
-          description: `Due ${hw.dueDate || hw.dueText || '—'} · ${hw.accuracy || '0%'} · ${hw.tasks?.length || 0} tasks`
-        })));
+        .addOptions(homeworkList.map(hw => {
+          const title = hw.title || 'Homework';
+          const taskCount = hw.tasks?.length || hw.totalTasks || 0;
+          return {
+            label: title.length > 25 ? title.slice(0, 22) + '...' : title,
+            value: hw.packageId,
+            description: `Due ${hw.dueDate || hw.dueText || '—'} · ${hw.accuracy || '0%'} · ${taskCount} tasks`
+          };
+        }));
 
       components.push(new ActionRowBuilder().addComponents(hwSelect));
 
-      // 5. Match the actual state key ('selectedTaskId', not 'selectedHomework')
-      if (session.selectedTaskId) {
-        const selected = session.tasks.find(h => h.packageId === session.selectedTaskId);
+      // Check BOTH selected keys
+      const selectedId = session?.selectedTaskId || session?.selectedHomework;
+      if (selectedId) {
+        const selected = homeworkList.find(h => h.packageId === selectedId);
         if (selected) {
+          const taskCount = selected.tasks?.length || selected.totalTasks || 0;
           embed.addFields({
             name: 'Selected',
-            value: `**${selected.title}**\nDue: ${selected.dueDate || selected.dueText || '—'}\nTasks: ${selected.tasks?.length || 0}\nAccuracy: ${selected.accuracy || '0%'}`,
+            value: `**${selected.title || 'Homework'}**\nDue: ${selected.dueDate || selected.dueText || '—'}\nTasks: ${taskCount}\nAccuracy: ${selected.accuracy || '0%'}`,
             inline: false
           });
 
