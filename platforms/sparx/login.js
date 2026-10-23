@@ -12,7 +12,6 @@ export async function sparxLogin({ school, username, password, onStatus }) {
   step('launching browser');
   let browser, page;
   try {
-    // Launch using the bundled Chromium binary (bypasses host postinstall blocks)
     browser = await puppeteerExtra.launch({
       args: chromium.args,
       defaultViewport: chromium.defaultViewport,
