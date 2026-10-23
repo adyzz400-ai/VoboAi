@@ -1,5 +1,5 @@
 // language: JavaScript (ESM), file: platforms/sparx/handlers.js
-import { EmbedBuilder, MessageFlags } from 'discord.js';
+import { EmbedBuilder, MessageFlags, ButtonBuilder, ButtonStyle, ActionRowBuilder } from 'discord.js';
 import { log, warn } from '../../utils/logger.js';
 import { getPlatform, setPlatform, patchPlatform, getTheme } from '../../hub/sessionStore.js';
 import { buildPanel } from './panel.js';
@@ -15,12 +15,18 @@ import { config } from '../../utils/config.js';
 import { SparxClient } from './client.js';
 import { parseHomeworkList, parseGetPackage } from './parser.js';
 
-function accentFor(userId) { return parseInt(getTheme(userId).replace('#', ''), 16) || 0x0a78ff; }
+function accentFor(userId) {
+  return parseInt(getTheme(userId).replace('#', ''), 16) || 0x0a78ff;
+}
 
 export const sparxHandlers = {
   async 'sparx:login'(interaction) {
     const accent = accentFor(interaction.user.id);
-    return interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [buildSparxVariantEmbed(accent)], components: [buildSparxVariantSelect()] });
+    return interaction.reply({
+      flags: MessageFlags.Ephemeral,
+      embeds: [buildSparxVariantEmbed(accent)],
+      components: [buildSparxVariantSelect()]
+    });
   },
 
   async 'sparx:login:variant'(interaction) {
@@ -38,67 +44,84 @@ export const sparxHandlers = {
     const password = interaction.fields.getTextInputValue('password');
     const accent = accentFor(interaction.user.id);
 
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    try {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    } catch (err) {
+      if (err.code === 10062 || err.code === 40060) return; // Interaction already expired
+      throw err;
+    }
 
     const status = async function (line) {
-      const embed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Sparx' }).setDescription('Logging in...').addFields({ name: 'Status', value: line });
+      const embed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Sparx' }).setDescription('Logging in — this panel updates live.').addFields({ name: 'Status', value: line });
       await interaction.editReply({ embeds: [embed] }).catch(() => {});
     };
 
     await status('queued');
 
     const task = new Task({
-      userId: interaction.user.id, kind: 'login', timeoutMs: 5 * 60 * 1000,
+      userId: interaction.user.id,
+      kind: 'login',
+      timeoutMs: 5 * 60 * 1000,
       run: async function () {
         try {
           const session = await sparxLogin({ school, username, password, onStatus: status });
 
           setPlatform(interaction.user.id, 'sparx', {
-            username, password, school, jwt: session.jwt, sessionId: session.sessionId,
-            cookie: session.cookie, browser: session.browser, page: session.page,
+            username, password, school,
+            jwt: session.jwt,
+            sessionId: session.sessionId,
+            cookie: session.cookie,
+            browser: session.browser,
+            page: session.page,
             jwtExpUnix: Math.floor(Date.now() / 1000) + 3600,
             waits: { min: config.waits.min, max: config.waits.max },
-            selectedHomework: null, homeworks: null, startedAt: Date.now()
+            selectedTaskId: null,
+            tasks: null,
+            startedAt: Date.now()
           });
 
-          await status('fetching homeworks');
+          await status('fetching tasks');
           try {
             const client = new SparxClient(session);
             const listBuffer = await client.getHomeworkList();
 
             if (!listBuffer || !Buffer.isBuffer(listBuffer)) {
               warn('[sparx] ListStudentPackages returned non-buffer');
-              patchPlatform(interaction.user.id, 'sparx', { homeworks: [] });
+              patchPlatform(interaction.user.id, 'sparx', { tasks: [] });
             } else {
               log('[sparx] list buffer bytes=' + listBuffer.length);
-              const homeworks = parseHomeworkList(listBuffer);
-              
-              // Fetch details for each homework
-              for (const hw of homeworks) {
+              const baseList = parseHomeworkList(listBuffer);
+
+              const homeworkList = [];
+              let totalTasks = 0;
+
+              for (const pkg of baseList) {
                 try {
-                  const pkgBuffer = await client.getPackage(hw.packageId);
+                  const pkgBuffer = await client.getPackage(pkg.packageId);
                   const detailed = parseGetPackage(pkgBuffer);
                   if (detailed) {
-                    hw.dueDate = detailed.dueDate || hw.dueDate;
-                    hw.title = detailed.title || hw.title;
-                    hw.accuracy = detailed.accuracy || hw.accuracy;
-                    hw.totalTasks = detailed.tasks ? detailed.tasks.length : 0;
+                    pkg.tasks = detailed.tasks || [];
+                    pkg.dueDate = detailed.dueDate || pkg.dueDate;
+                    pkg.title = detailed.title || pkg.title;
+                    pkg.accuracy = detailed.accuracy || pkg.accuracy;
                   }
-                } catch (err) { 
-                  warn(`[sparx] GetPackage ${hw.packageId} failed: ${err.message}`); 
+                } catch (err) {
+                  warn(`[sparx] GetPackage ${pkg.packageId} failed: ${err.message}`);
                 }
+                totalTasks += pkg.tasks ? pkg.tasks.length : 0;
+                homeworkList.push(pkg);
               }
 
-              log('[sparx] homeworks=' + homeworks.length);
-              patchPlatform(interaction.user.id, 'sparx', { homeworks });
+              log('[sparx] homeworks=' + homeworkList.length + ' tasks=' + totalTasks);
+              patchPlatform(interaction.user.id, 'sparx', { tasks: homeworkList });
             }
-          } catch (err) { 
-            warn('[sparx] homework list failed: ' + err.message); 
-            patchPlatform(interaction.user.id, 'sparx', { homeworks: [] }); 
+          } catch (err) {
+            warn('[sparx] task list failed: ' + err.message);
+            patchPlatform(interaction.user.id, 'sparx', { tasks: [] });
           }
 
           const panel = await buildPanel({ interaction });
-          await interaction.editReply({ embeds: [panel.embed], components: panel.components });
+          await interaction.editReply({ embeds: [panel.embed], components: panel.components }).catch(() => {});
         } catch (err) {
           log('[sparx] login error: ' + err.message);
           const embed = new EmbedBuilder().setColor(0xed4245).setAuthor({ name: 'Vobo AI · Sparx' }).setDescription('❌ Login failed: ' + err.message);
@@ -109,7 +132,9 @@ export const sparxHandlers = {
     queue.enqueue(task);
   },
 
-  async 'sparx:timing'(interaction) { return interaction.showModal(buildSparxTimingModal(getPlatform(interaction.user.id, 'sparx'))); },
+  async 'sparx:timing'(interaction) {
+    return interaction.showModal(buildSparxTimingModal(getPlatform(interaction.user.id, 'sparx')));
+  },
 
   async 'sparx:timing:submit'(interaction) {
     const min = Number(interaction.fields.getTextInputValue('min'));
@@ -119,33 +144,37 @@ export const sparxHandlers = {
       return interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed] });
     }
     patchPlatform(interaction.user.id, 'sparx', { waits: { min, max } });
-    await interaction.deferUpdate();
+    
     const panel = await buildPanel({ interaction });
-    await interaction.editReply({ embeds: [panel.embed], components: panel.components });
+    await interaction.update({ embeds: [panel.embed], components: panel.components });
   },
 
-  async 'sparx:settings'(interaction) { return interaction.showModal(buildSparxSettingsModal(getPlatform(interaction.user.id, 'sparx'))); },
+  async 'sparx:settings'(interaction) {
+    return interaction.showModal(buildSparxSettingsModal(getPlatform(interaction.user.id, 'sparx')));
+  },
 
   async 'sparx:settings:submit'(interaction) {
     const min = Number(interaction.fields.getTextInputValue('min'));
     const max = Number(interaction.fields.getTextInputValue('max'));
     const model = interaction.fields.getTextInputValue('model')?.trim() || null;
+
     if (min < 1 || max < 1 || max > 200 || min > max) {
       const embed = new EmbedBuilder().setColor(0xed4245).setDescription('Invalid wait window.');
       return interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed] });
     }
-    patchPlatform(interaction.user.id, 'sparx', { waits: { min, max }, model });
-    await interaction.deferUpdate();
+
+    patchPlatform(interaction.user.id, 'sparx', { waits: { min, max }, model: model });
+    
     const panel = await buildPanel({ interaction });
-    await interaction.editReply({ embeds: [panel.embed], components: panel.components });
+    await interaction.update({ embeds: [panel.embed], components: panel.components });
   },
 
-  async 'sparx:homework'(interaction) {
-    const hwId = interaction.values[0];
-    patchPlatform(interaction.user.id, 'sparx', { selectedHomework: hwId });
-    await interaction.deferUpdate();
+  async 'sparx:task'(interaction) {
+    const taskId = interaction.values[0];
+    patchPlatform(interaction.user.id, 'sparx', { selectedTaskId: taskId });
+    
     const panel = await buildPanel({ interaction });
-    await interaction.editReply({ embeds: [panel.embed], components: panel.components });
+    await interaction.update({ embeds: [panel.embed], components: panel.components });
   },
 
   async 'sparx:start'(interaction) {
@@ -153,11 +182,17 @@ export const sparxHandlers = {
     const session = getPlatform(userId, 'sparx');
     const accent = accentFor(userId);
 
-    if (!session?.jwt) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Session expired. Re-login.' });
-    if (!session.selectedHomework) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Select a homework first.' });
+    if (!session?.jwt) {
+      return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Session expired. Re-login.' });
+    }
+    if (!session.selectedTaskId) {
+      return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Pick a homework from the dropdown first.' });
+    }
 
-    const homework = (session.homeworks || []).find(h => h.packageId === session.selectedHomework);
-    if (!homework) return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Homework not found.' });
+    const homework = (session.tasks || []).find((t) => String(t.packageId) === String(session.selectedTaskId));
+    if (!homework) {
+      return interaction.reply({ flags: MessageFlags.Ephemeral, content: 'Selected homework not found.' });
+    }
 
     const ackEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Sparx' }).setDescription('📥 Opening DM. Progress will stream there.');
     await interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [ackEmbed] });
@@ -165,31 +200,35 @@ export const sparxHandlers = {
     let progressMsg;
     try {
       const dmChannel = await interaction.user.createDM();
-      const dmEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Sparx' }).setDescription('⏳ Starting homework...');
+      const dmEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Sparx' }).setDescription('⏳ Waiting for queue slot…');
       progressMsg = await dmChannel.send({ embeds: [dmEmbed] });
-    } catch (err) { return interaction.editReply({ content: 'Could not open DMs.' }); }
+    } catch (err) {
+      return interaction.editReply({ content: 'Could not open DMs.' });
+    }
 
     const signal = { cancelled: false };
     const task = new Task({
-      userId, kind: 'run', timeoutMs: 60 * 60 * 1000,
+      userId: userId,
+      kind: 'run',
+      timeoutMs: 60 * 60 * 1000,
       run: async function () {
         try {
           const summary = await runSparxPackage({
-            session, packageId: homework.packageId, homework,
-            interaction: { editReply: (opts) => progressMsg.edit(opts) },
-            signal, onLog: (txt) => log('[sparx] ' + txt)
+            session: session,
+            packageId: homework.packageId,
+            homework: homework,
+            interaction: { editReply: (opts) => progressMsg.edit(opts).catch(() => {}) },
+            signal: signal,
+            onLog: (txt) => log('[sparx] ' + txt)
           });
 
-          if (summary.cancelled) {
-            const cancelEmbed = new EmbedBuilder().setColor(0xeab308).setAuthor({ name: 'Vobo AI · Cancelled' }).setDescription('Stopped by user.\n**Correct**: ' + summary.totalCorrect);
-            await progressMsg.edit({ embeds: [cancelEmbed], components: [] });
-          } else if (summary.success) {
-            const finalEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Complete' }).setDescription('✅ Homework finished!\n**Total correct**: ' + summary.totalCorrect);
-            await progressMsg.edit({ embeds: [finalEmbed], components: [] });
+          if (summary.success) {
+            const finalEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Homework complete' }).setDescription('Finished all tasks in the homework!\nTotal correct: ' + summary.totalCorrect);
+            await progressMsg.edit({ embeds: [finalEmbed] }).catch(() => {});
           } else {
-            const failLines = (summary.failedTasks || []).map(t => `• **${t.title}** — ${t.error}`).join('\n') || '• (no tasks ran)';
-            const partialEmbed = new EmbedBuilder().setColor(0xed4245).setAuthor({ name: 'Vobo AI · Incomplete' }).setDescription(`**Correct**: ${summary.totalCorrect}\n\n**Failures**\n${failLines}`);
-            await progressMsg.edit({ embeds: [partialEmbed], components: [] });
+            const failLines = (summary.failedTasks || []).map((t) => `• **${t.title}** — ${t.error}`).join('\n') || '• (no tasks ran)';
+            const partialEmbed = new EmbedBuilder().setColor(0xed4245).setAuthor({ name: 'Vobo AI · Homework incomplete' }).setDescription(`Some tasks did not complete.\n**Correct so far**: ${summary.totalCorrect}\n**Questions completed**: ${summary.questionsCompleted}\n\n**Failures**\n${failLines}`);
+            await progressMsg.edit({ embeds: [partialEmbed] }).catch(() => {});
           }
         } catch (e) {
           log('[sparx] FATAL: ' + e.message);
