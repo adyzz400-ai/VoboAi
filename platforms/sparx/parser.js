@@ -209,16 +209,22 @@ export function parseHomeworkList(buffer) {
   const top = byTag(raw, 0, raw.length);
 
   console.log('[sparx-debug] Raw response length:', raw.length);
-  console.log('[sparx-debug] Top level tags:', Array.from(top.keys()));
   const firstPkg = (top.get(1) || [])[0];
   if (firstPkg) {
     const pkgBytes = sub(raw, firstPkg);
     const pm = byTag(pkgBytes, 0, pkgBytes.length);
     console.log('[sparx-debug] Package tags:', Array.from(pm.keys()));
-    const titleF = (pm.get(2) || [])[0];
-    if (titleF) {
-      const rawTitle = str(pkgBytes, titleF);
-      console.log('[sparx-debug] Raw title from field 2:', rawTitle);
+    
+    // Dump fields 2, 3, 4, 5, 6, 8, 9, 11 to find the real title
+    for (const tag of [2, 3, 4, 5, 6, 8, 9, 11]) {
+      const f = (pm.get(tag) || [])[0];
+      if (f) {
+        if (f.wt === 2) {
+          console.log(`[sparx-debug] Field ${tag} (string):`, str(pkgBytes, f));
+        } else {
+          console.log(`[sparx-debug] Field ${tag} (wire type):`, f.wt);
+        }
+      }
     }
   }
 
