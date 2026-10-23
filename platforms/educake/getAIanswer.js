@@ -3,7 +3,9 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { log, warn } from '../../utils/logger.js';
 import { config } from '../../utils/config.js';
 
-const MODEL_CHAIN = config.aiModels || ['gemini-2.5-flash'];
+// Force a clean, valid model chain. Strip any accidental whitespace.
+const PRIMARY_MODEL = (process.env.GEMINI_DEFAULT_MODEL || config.geminiDefault || 'gemini-1.5-flash').trim();
+const MODEL_CHAIN = [PRIMARY_MODEL, 'gemini-1.5-flash', 'gemini-1.0-pro'].filter((v, i, a) => a.indexOf(v) === i);
 
 const SYSTEM_RULE = (q) => {
   let prompt = '';
@@ -39,8 +41,11 @@ async function fetchImageAsInline(imageUrl, session) {
 }
 
 async function callOnce(model, parts) {
-  const apiKey = process.env.GEMINI_API_KEY || config.geminiKey;
-  if (!apiKey) throw new Error('GEMINI_API_KEY not set');
+  // Strip whitespace from API key to prevent authentication failures
+  const rawKey = process.env.GEMINI_API_KEY || config.geminiKey;
+  const apiKey = rawKey ? String(rawKey).trim() : null;
+  
+  if (!apiKey) throw new Error('GEMINI_API_KEY is missing or empty. Check your environment variables.');
   
   const genAI = new GoogleGenerativeAI(apiKey);
   const genModel = genAI.getGenerativeModel({ model });
@@ -63,15 +68,19 @@ async function callOnce(model, parts) {
     contents.push({ role: 'user', parts: [{ text: textParts.join('\n') }] });
   }
   
-  const result = await genModel.generateContent({ contents });
-  const response = result.response;
-  return response.text();
+  try {
+    const result = await genModel.generateContent({ contents });
+    const response = result.response;
+    return response.text();
+  } catch (err) {
+    // Log the EXACT error from Google to see if it's 404, 401, 403, etc.
+    const status = err.status || err.response?.status || 'unknown';
+    const message = err.message || 'Unknown error';
+    throw new Error(`Model '${model}' failed with status ${status}: ${message}`);
+  }
 }
 
 export async function getAIanswer(q, session, opts = {}) {
-  const model = opts.model || config.geminiDefault || MODEL_CHAIN[0];
-  const chain = [model, ...MODEL_CHAIN.filter(m => m !== model)];
-
   const parts = [{ text: SYSTEM_RULE(q) + '\n\nQuestion:\n' + q.prompt }];
 
   if (q.image) {
@@ -79,46 +88,23 @@ export async function getAIanswer(q, session, opts = {}) {
     if (inline) parts.push(inline);
   }
 
-  for (let i = 0; i < chain.length; i++) {
-    const m = chain[i];
+  for (let i = 0; i < MODEL_CHAIN.length; i++) {
+    const m = MODEL_CHAIN[i];
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const raw = await callOnce(m, parts);
-        const text = raw.replace(/^["'`]+|["'`]+$/g, '').replace(/^```json\s*|\s*```$/g, '').trim();
-
-        if (!text) continue;
-
-        if (q.fields && q.fields.length > 0) {
-          try {
-            const parsed = JSON.parse(text);
-            const answers = {};
-            q.fields.forEach((f, idx) => {
-              const key = f.label || `field_${idx}`;
-              answers[f.ref] = String(parsed[key] || parsed[f.label] || text).trim();
-            });
-            log(`[gemini] Success with ${m} -> structured fields`);
-            return { answers, model: m };
-          } catch (e) {
-            const answers = {};
-            q.fields.forEach(f => { answers[f.ref] = text; });
-            log(`[gemini] Success with ${m} -> mapped plain text to fields`);
-            return { answers, model: m };
-          }
+        if (!raw || !raw.trim()) continue;
+        
+        let answer = raw.trim();
+        if (answer.startsWith('```json')) {
+          answer = answer.replace(/^```json\s*/, '').replace(/\s*```$/, '').trim();
+        } else if (answer.startsWith('```')) {
+          answer = answer.replace(/^```\s*/, '').replace(/\s*```$/, '').trim();
         }
-
-        if (text) {
-          log(`[gemini] Success with ${m} -> "${text}"`);
-          return { answer: text, model: m };
-        }
+        
+        return { answer, model: m };
       } catch (err) {
-        const status = err?.status || err?.response?.status;
-        warn(`[gemini] ${m} failed (${status || err.message || '?'})`);
-        if (status === 404) break;
-        if (status === 503 || status === 429) {
-          await new Promise(r => setTimeout(r, 15000));
-          continue;
-        }
-        break;
+        warn(`[gemini] ${err.message}`);
       }
     }
   }
