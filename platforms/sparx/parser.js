@@ -157,8 +157,8 @@ export function parseSparxQuestion(buffer) {
   const parsed = JSON.parse(s.slice(start, jEnd));
   const layout = Array.isArray(parsed) ? parsed[0] : parsed;
   
-  // FIXED: Capture full standard UUID format for activity IDs
-  const actMatch = s.match(/\/activities\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+  // FIXED: Captures the full activity ID, no matter the length
+  const actMatch = s.match(/\/activities\/([0-9a-f-]+)/i);
   const activityId = actMatch ? actMatch[1] : null;
   const root = layout.layout || layout;
 
