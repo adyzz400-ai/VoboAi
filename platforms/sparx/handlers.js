@@ -13,7 +13,7 @@ import { queue } from '../../queue/index.js';
 import { Task } from '../../queue/task.js';
 import { config } from '../../utils/config.js';
 import { SparxClient } from './client.js';
-import { parseHomeworkList, parseGetPackage, parseTaskList } from './parser.js';
+import { parseHomeworkList, parseGetPackage } from './parser.js';
 
 function accentFor(userId) {
   return parseInt(getTheme(userId).replace('#', ''), 16) || 0x0a78ff;
@@ -99,13 +99,11 @@ export const sparxHandlers = {
                     pkg.title = detailed.title || pkg.title;
                     pkg.accuracy = detailed.accuracy || pkg.accuracy;
                   }
-
-                  // NEW: Fetch tasks separately via ListTasks endpoint
-                  const tasksBuffer = await client.listTasks(pkg.packageId);
-                  pkg.tasks = parseTaskList(tasksBuffer) || [];
-
+                  
+                  // TEMPORARY: Tasks array remains empty until diagnostic logs reveal the correct endpoint
+                  pkg.tasks = []; 
                 } catch (err) {
-                  warn(`[sparx] GetPackage/ListTasks ${pkg.packageId} failed: ${err.message}`);
+                  warn(`[sparx] GetPackage ${pkg.packageId} failed: ${err.message}`);
                   pkg.tasks = [];
                 }
                 totalTasks += pkg.tasks.length;
