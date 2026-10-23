@@ -89,7 +89,7 @@ export const sparxHandlers = {
 
               const homeworkList = [];
               let totalTasks = 0;
-              let taskCounter = 1;
+              let globalTaskCounter = 1;
 
               for (const pkg of baseList) {
                 try {
@@ -98,16 +98,28 @@ export const sparxHandlers = {
                   if (detailed) {
                     pkg.dueDate = detailed.dueDate || pkg.dueDate;
                     pkg.title = detailed.title || pkg.title;
+                    // Use detailed accuracy (from XP "AC" key) — fixes 0% issue
                     pkg.accuracy = detailed.accuracy || pkg.accuracy;
                     pkg.tasks = detailed.tasks || [];
 
-                    // Rename generic titles to "Task X" while preserving Flashcards/Times Tables
+                    // Rename generic titles sequentially
                     pkg.tasks.forEach(t => {
                       if (t.title === 'Homework' || t.title === 'Task' || t.title.length < 5) {
-                        t.title = 'Task ' + taskCounter;
+                        t.title = 'Task ' + globalTaskCounter;
                       }
-                      taskCounter++;
+                      globalTaskCounter++;
                     });
+
+                    // Recalculate accuracy from tasks if package accuracy is still 0
+                    if (!pkg.accuracy || pkg.accuracy === '0%') {
+                      const completed = pkg.tasks.filter(t => {
+                        const done = t.done || 0;
+                        const total = t.total || 10;
+                        return done >= total;
+                      }).length;
+                      const pct = pkg.tasks.length > 0 ? Math.round((completed / pkg.tasks.length) * 100) : 0;
+                      pkg.accuracy = pct + '%';
+                    }
                   }
                 } catch (err) {
                   warn(`[sparx] GetPackage ${pkg.packageId} failed: ${err.message}`);
@@ -227,13 +239,16 @@ export const sparxHandlers = {
             onLog: (txt) => log('[sparx] ' + txt)
           });
 
-          if (summary.success) {
+          if (summary.cancelled) {
+            const cancelEmbed = new EmbedBuilder().setColor(0xeab308).setAuthor({ name: 'Vobo AI · Cancelled' }).setDescription('Automation stopped by user.\n**Correct so far**: ' + summary.totalCorrect + '\n**Questions completed**: ' + summary.questionsCompleted);
+            await progressMsg.edit({ embeds: [cancelEmbed], components: [] });
+          } else if (summary.success) {
             const finalEmbed = new EmbedBuilder().setColor(accent).setAuthor({ name: 'Vobo AI · Homework complete' }).setDescription('Finished all tasks in the homework!\nTotal correct: ' + summary.totalCorrect);
-            await progressMsg.edit({ embeds: [finalEmbed] });
+            await progressMsg.edit({ embeds: [finalEmbed], components: [] });
           } else {
             const failLines = (summary.failedTasks || []).map((t) => `• **${t.title}** — ${t.error}`).join('\n') || '• (no tasks ran)';
             const partialEmbed = new EmbedBuilder().setColor(0xed4245).setAuthor({ name: 'Vobo AI · Homework incomplete' }).setDescription(`Some tasks did not complete.\n**Correct so far**: ${summary.totalCorrect}\n**Questions completed**: ${summary.questionsCompleted}\n\n**Failures**\n${failLines}`);
-            await progressMsg.edit({ embeds: [partialEmbed] });
+            await progressMsg.edit({ embeds: [partialEmbed], components: [] });
           }
         } catch (e) {
           log('[sparx] FATAL: ' + e.message);
