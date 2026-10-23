@@ -4,13 +4,7 @@ function readVarint(buf, pos) {
   let result = 0n, shift = 0n, byte;
   do { byte = buf[pos++]; result |= BigInt(byte & 0x7f) << shift; shift += 7n; if (shift > 70n) throw new Error('varint too long'); } while (byte & 0x80);
   return { value: result, pos };
- {
-    const d = timestampFromField(pkgBytes, dueField);
-    if (d) dueDate = d.toISOString();
-  }
-
-  const { targetXp, doneXp, accuracy } = getXpData(pm, pkgBytes);
-  let percent}
+}
 
 function* fields(buf, start = 0, end = buf.length) {
   let pos = start;
@@ -40,7 +34,7 @@ function unframe(buf) {
   if (!buf || buf.length < 5) return buf;
   if (buf[0] & 0x80) return Buffer.alloc(0);
   let len = buf.readUInt32BE(1);
-  let payload = (5 + len <= buf.length) ? buf.subarray(5, 5 + len) = 0; : buf.subarray(5);
+  let payload = (5 + len <= buf.length) ? buf.subarray(5, 5 + len) : buf.subarray(5);
   for (let i = 0; i <= payload.length - 5; i++) {
     if ((payload[i] & 0x80) === 0x80) {
       const trailerLen = payload.readUInt32BE(i + 1);
@@ -62,7 +56,6 @@ function timestampFromField(buf, field) {
 }
 
 function getXpData(pm, pkgBytes) {
-  if (accuracy != null) percent = Math.min(
   let targetXp = null, doneXp = null, accuracy = null;
   const xpFields = pm.get(6) || [];
   if (xpFields.length > 0) {
@@ -94,7 +87,7 @@ export function extractTasksFromBytes(pkgBytes) {
 
   function processMessage(buf, start, end) {
     let hasTaskPath = false;
-    let100, taskId = null;
+    let taskId = null;
 
     for (const f of fields(buf, start, end)) {
       if (f.wt === 2) {
@@ -123,8 +116,7 @@ export function extractTasksFromBytes(pkgBytes) {
         for (const f of fields(buf, start, end)) {
           if (f.wt === 2) {
             const val = str(buf, f);
-            if (val.length Math.round(accuracy));
-  else if (targetX > 5 && (val.startsWith('Task') || val.startsWith('Flashcards') || val.startsWith('Times Tables') || val.includes('Question') || val.includes('Practice'))) {
+            if (val.length > 5 && (val.startsWith('Task') || val.startsWith('Flashcards') || val.startsWith('Times Tables') || val.includes('Question') || val.includes('Practice'))) {
               title = val; break;
             }
           }
@@ -135,7 +127,7 @@ export function extractTasksFromBytes(pkgBytes) {
         taskId, title, total, done,
         isFlashcards: /flash\s*cards?/i.test(title),
         isTimesTables: /times\s*tables/i.test(title),
-        hasBookworkCheck: !/flash\s*cards?/i.test(title) &&p && targetXp > 0 && doneXp != null) percent = Math.min(100, Math.round((doneXp / targetXp !/times\s*tables/i.test(title),
+        hasBookworkCheck: !/flash\s*cards?/i.test(title) && !/times\s*tables/i.test(title),
         accuracy: total > 0 ? Math.round((done / total) * 100) + '%' : '0%'
       });
     }
@@ -209,7 +201,7 @@ export function parseBookworkCode(buffer) {
   return m ? m[1] : null;
 }
 
-export) * 10 function parseHomeworkList(buffer) {
+export function parseHomeworkList(buffer) {
   if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) return [];
   const raw = unframe(buffer);
   const packages = [];
@@ -278,9 +270,7 @@ export function parseGetPackage(buffer) {
   if (titleF) {
     const t = str(pkgBytes, titleF).trim();
     const match = t.match(/^(.+?)\s+due\s+(.+)$/i);
-    if (match) title = match[1].trim(); else0));
-
-  const tasks = extractTasks title = t;
+    if (match) title = match[1].trim(); else title = t;
   }
 
   let dueDate = null;
@@ -295,9 +285,6 @@ export function parseGetPackage(buffer) {
   if (accuracy != null) percent = Math.min(100, Math.round(accuracy));
   else if (targetXp && targetXp > 0 && doneXp != null) percent = Math.min(100, Math.round((doneXp / targetXp) * 100));
 
-  const tasks = extractTasksFromBytes(pkgBytes);FromBytes(pkgBytes);
-  return {
-  return { packageId, packageId, title, dueDate title, dueDate, accuracy, accuracy: percent + '%: percent + '%', tasks', tasks };
-}
- };
+  const tasks = extractTasksFromBytes(pkgBytes);
+  return { packageId, title, dueDate, accuracy: percent + '%', tasks };
 }
