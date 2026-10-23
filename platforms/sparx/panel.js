@@ -8,19 +8,20 @@ import {
 } from 'discord.js';
 import { getPlatform, getTheme } from '../../hub/sessionStore.js';
 
-export function buildPanel({ interaction, loginVariant }) {
+export function buildPanel({ interaction }) {
   const userId = interaction.user.id;
   const session = getPlatform(userId, 'sparx');
   const hex = getTheme(userId);
   const accent = parseInt(hex.replace('#', ''), 16) || 0x0a78ff;
 
-  const isLoggedIn = !!session?.jwt || !!session?.isLoggedIn;
+  const isLoggedIn = !!session?.jwt;
   const components = [];
   
   const embed = new EmbedBuilder()
     .setColor(accent)
     .setAuthor({ name: 'Vobo AI · Sparx Maths' });
 
+  // 1. Handle unauthenticated state (was missing, causing the login button to vanish)
   if (!isLoggedIn) {
     embed.setDescription('**Not logged in.**\n\nConnect your Sparx Maths account to load homework and start automating.');
     
@@ -33,24 +34,27 @@ export function buildPanel({ interaction, loginVariant }) {
   } else {
     embed.setDescription('**Welcome to Sparx Automation**\n\nSelect a homework below to start.');
     
-    if (session?.homeworks && session.homeworks.length > 0) {
+    // 2. Match the actual key used by handlers.js and parser.js ('tasks', not 'homeworks')
+    if (session?.tasks && session.tasks.length > 0) {
       const hwSelect = new StringSelectMenuBuilder()
-        .setCustomId('sparx:homework')
+        .setCustomId('sparx:task') // 3. Match the actual handler name in handlers.js
         .setPlaceholder('Select homework...')
-        .addOptions(session.homeworks.map(hw => ({
+        .addOptions(session.tasks.map(hw => ({
           label: hw.title.length > 25 ? hw.title.slice(0, 22) + '...' : hw.title,
           value: hw.packageId,
-          description: `Due ${hw.dueText || '—'} · ${hw.accuracy || '0%'} · ${hw.totalTasks || 0} tasks`
+          // 4. Use hw.tasks?.length for accurate task count from parser.js output
+          description: `Due ${hw.dueDate || hw.dueText || '—'} · ${hw.accuracy || '0%'} · ${hw.tasks?.length || 0} tasks`
         })));
 
       components.push(new ActionRowBuilder().addComponents(hwSelect));
 
-      if (session.selectedHomework) {
-        const selected = session.homeworks.find(h => h.packageId === session.selectedHomework);
+      // 5. Match the actual state key ('selectedTaskId', not 'selectedHomework')
+      if (session.selectedTaskId) {
+        const selected = session.tasks.find(h => h.packageId === session.selectedTaskId);
         if (selected) {
           embed.addFields({
             name: 'Selected',
-            value: `**${selected.title}**\nDue: ${selected.dueText || '—'}\nTasks: ${selected.totalTasks || 0}\nAccuracy: ${selected.accuracy || '0%'}`,
+            value: `**${selected.title}**\nDue: ${selected.dueDate || selected.dueText || '—'}\nTasks: ${selected.tasks?.length || 0}\nAccuracy: ${selected.accuracy || '0%'}`,
             inline: false
           });
 
@@ -61,7 +65,7 @@ export function buildPanel({ interaction, loginVariant }) {
         }
       }
     } else {
-      embed.addFields({ name: 'Homework', value: 'No outstanding homework found.' });
+      embed.addFields({ name: 'Homework', value: 'No outstanding homework found. Please login again.' });
     }
 
     const settingsRow = new ActionRowBuilder().addComponents(
