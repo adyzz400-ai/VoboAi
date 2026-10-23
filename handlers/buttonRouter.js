@@ -8,7 +8,6 @@ export function register(prefix, handler) {
 export async function dispatch(interaction) {
   if (!interaction.isButton()) return false;
   
-  // Split customId by ':' and get the first part (e.g., 'sparx' from 'sparx:cancel')
   const [prefix] = interaction.customId.split(':');
   const handler = routes.get(prefix);
   
@@ -23,9 +22,7 @@ export async function dispatch(interaction) {
   return true;
 }
 
-// Register the cancel handler under the 'sparx' prefix
 register('sparx', async (interaction) => {
-  // Only handle the exact cancel command
   if (interaction.customId !== 'sparx:cancel') return;
   
   const { getPlatform } = await import('../hub/sessionStore.js');
