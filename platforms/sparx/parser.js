@@ -86,45 +86,67 @@ export function extractTasksFromBytes(pkgBytes) {
   const seen = new Set();
 
   function processMessage(buf, start, end) {
-    let hasTaskPath = false;
-    let taskId = null;
+    let hasPath = false;
+    let id = null;
+    let pathType = 'unknown';
 
+    // Look for BOTH activities/ and tasks/ paths
     for (const f of fields(buf, start, end)) {
       if (f.wt === 2) {
         const val = str(buf, f);
-        const tMatch = val.match(/tasks\/([0-9a-f-]+)/i);
-        if (tMatch) {
-          hasTaskPath = true;
-          taskId = tMatch[1].toLowerCase();
+        const actMatch = val.match(/activities\/([0-9a-f-]+)/i);
+        const taskMatch = val.match(/tasks\/([0-9a-f-]+)/i);
+        
+        if (actMatch) {
+          hasPath = true;
+          id = actMatch[1].toLowerCase();
+          pathType = 'activity';
+          break; // Prefer activity ID if found
+        } else if (taskMatch) {
+          hasPath = true;
+          id = taskMatch[1].toLowerCase();
+          pathType = 'task';
           break;
         }
       }
     }
 
-    if (hasTaskPath && taskId && !seen.has(taskId)) {
-      seen.add(taskId);
+    if (hasPath && id && !seen.has(id)) {
+      seen.add(id);
       let title = 'Task';
       let total = 10, done = 0;
+      let bestTitleLength = 0;
 
       for (const f of fields(buf, start, end)) {
-        if (f.tag === 2 && f.wt === 2) title = str(buf, f).trim();
-        else if (f.tag === 6 && f.wt === 0) total = Number(readVarint(buf, f.payloadStart).value) || 10;
-        else if (f.tag === 7 && f.wt === 0) done = Number(readVarint(buf, f.payloadStart).value) || 0;
-      }
-
-      if (title === 'Task' || title.length < 5) {
-        for (const f of fields(buf, start, end)) {
-          if (f.wt === 2) {
-            const val = str(buf, f);
-            if (val.length > 5 && (val.startsWith('Task') || val.startsWith('Flashcards') || val.startsWith('Times Tables') || val.includes('Question') || val.includes('Practice'))) {
-              title = val; break;
+        if (f.tag === 2 && f.wt === 2) {
+          const t = str(buf, f).trim();
+          // Prefer longer, more descriptive titles over generic "Task" or "Homework"
+          if (t.length > bestTitleLength && t.length > 4) {
+            const lower = t.toLowerCase();
+            if (!['task', 'homework', 'practice', 'revision'].includes(lower)) {
+              title = t;
+              bestTitleLength = t.length;
             }
           }
+        } else if (f.tag === 6 && f.wt === 0) {
+          total = Number(readVarint(buf, f.payloadStart).value) || 10;
+        } else if (f.tag === 7 && f.wt === 0) {
+          done = Number(readVarint(buf, f.payloadStart).value) || 0;
         }
       }
 
+      // Fallback title cleanup
+      if (bestTitleLength === 0 || title.toLowerCase() === 'task' || title.toLowerCase() === 'homework') {
+        title = `Task ${tasks.length + 1}`;
+      }
+
+      console.log(`[sparx-debug-task] Found ${pathType} ID: ${id} | Title: "${title}" | Total: ${total} | Done: ${done}`);
+
       tasks.push({
-        taskId, title, total, done,
+        taskId: id,
+        title,
+        total,
+        done,
         isFlashcards: /flash\s*cards?/i.test(title),
         isTimesTables: /times\s*tables/i.test(title),
         hasBookworkCheck: !/flash\s*cards?/i.test(title) && !/times\s*tables/i.test(title),
@@ -138,6 +160,7 @@ export function extractTasksFromBytes(pkgBytes) {
   }
 
   processMessage(pkgBytes, 0, pkgBytes.length);
+  console.log(`[sparx-debug-task] Total tasks extracted: ${tasks.length}`);
   return tasks;
 }
 
@@ -166,9 +189,6 @@ export function parseSparxQuestion(buffer) {
   const imgMatch = s.match(/"src"\s*:\s*"([^"]+)"/);
   if (imgMatch) imageUrl = imgMatch[1];
 
-  let choiceIndex = 0;
-  let fieldIndex = 0;
-
   function walk(node, prevText = '') {
     if (!node || typeof node !== 'object') return;
     if (Array.isArray(node)) {
@@ -179,42 +199,18 @@ export function parseSparxQuestion(buffer) {
     if (node.element === 'text') { promptParts.push(node.text); return; }
     if (node.element === 'image' || node.element === 'img') { if (node.src) imageUrl = node.src; return; }
     if (node.element === 'card' || node.element === 'choice') {
-      // FIX: Ensure ref is valid, generate one if missing
-      const ref = node.ref || `choice_${choiceIndex++}`;
-      choices.push({ 
-        ref: ref, 
-        text: (node.content && node.content[0] && node.content[0].text) || '' 
-      });
+      choices.push({ ref: node.ref, text: (node.content && node.content[0] && node.content[0].text) || '' });
       return;
     }
-    if (node.element === 'slot') { 
-      // FIX: Ensure ref is valid
-      const ref = node.ref || `slot_${fieldIndex++}`;
-      slots.push({ ref: ref, accept: node.accept }); 
-      promptParts.push('___'); 
-      return; 
-    }
-    if (node.element === 'number-field') { 
-      // FIX: Ensure ref is valid and extract label properly
-      const ref = node.ref || `number_${fieldIndex++}`;
-      numberFields.push({ ref: ref, label: prevText || node.label || `Field ${fieldIndex}` }); 
-      promptParts.push('___'); 
-      return; 
-    }
-    if (node.element === 'text-field') { 
-      // FIX: Ensure ref is valid
-      const ref = node.ref || `text_${fieldIndex++}`;
-      textFields.push({ ref: ref }); 
-      promptParts.push('___'); 
-      return; 
-    }
+    if (node.element === 'slot') { slots.push({ ref: node.ref, accept: node.accept }); promptParts.push('___'); return; }
+    if (node.element === 'number-field') { numberFields.push({ ref: node.ref, label: prevText }); promptParts.push('___'); return; }
+    if (node.element === 'text-field') { textFields.push({ ref: node.ref }); promptParts.push('___'); return; }
     if (node.content) {
       let lastText = prevText;
       for (const child of node.content) { walk(child, lastText); if (child.element === 'text') lastText = child.text; }
     }
   }
   walk(root);
-  
   const prompt = promptParts.join(' ').replace(/\s+/g, ' ').trim();
   if (numberFields.length > 0) return { prompt, choices: [], numberFields, image: imageUrl, activityId, type: 'number' };
   if (textFields.length > 0) return { prompt, choices: [], textFields, image: imageUrl, activityId, type: 'text' };
