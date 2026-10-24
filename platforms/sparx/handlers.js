@@ -144,7 +144,6 @@ export const sparxHandlers = {
       return interaction.reply({ flags: MessageFlags.Ephemeral, embeds: [embed] });
     }
     patchPlatform(interaction.user.id, 'sparx', { waits: { min, max } });
-    
     const panel = await buildPanel({ interaction });
     await interaction.update({ embeds: [panel.embed], components: panel.components });
   },
@@ -164,7 +163,6 @@ export const sparxHandlers = {
     }
 
     patchPlatform(interaction.user.id, 'sparx', { waits: { min, max }, model: model });
-    
     const panel = await buildPanel({ interaction });
     await interaction.update({ embeds: [panel.embed], components: panel.components });
   },
@@ -172,7 +170,6 @@ export const sparxHandlers = {
   async 'sparx:task'(interaction) {
     const taskId = interaction.values[0];
     patchPlatform(interaction.user.id, 'sparx', { selectedTaskId: taskId });
-    
     const panel = await buildPanel({ interaction });
     await interaction.update({ embeds: [panel.embed], components: panel.components });
   },
