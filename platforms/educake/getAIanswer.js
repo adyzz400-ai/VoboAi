@@ -3,7 +3,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { log, warn } from '../../utils/logger.js';
 import { config } from '../../utils/config.js';
 
-// Match the working Python bot's model chain
+// EXACT models from your working Python bot
 const PRIMARY_MODEL = (process.env.GEMINI_DEFAULT_MODEL || config.geminiDefault || 'gemini-3.5-flash-lite').trim();
 const FALLBACK_MODELS = (process.env.GEMINI_FALLBACK_MODELS || 'gemini-3.8-flash').split(',').map(m => m.trim());
 const MODEL_CHAIN = [PRIMARY_MODEL, ...FALLBACK_MODELS].filter((v, i, a) => a.indexOf(v) === i);
