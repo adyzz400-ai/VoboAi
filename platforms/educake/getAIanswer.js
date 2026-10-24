@@ -3,111 +3,79 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { log, warn } from '../../utils/logger.js';
 import { config } from '../../utils/config.js';
 
-// EXACT models from your working Python bot
-const PRIMARY_MODEL = (process.env.GEMINI_DEFAULT_MODEL || config.geminiDefault || 'gemini-3.5-flash-lite').trim();
-const FALLBACK_MODELS = (process.env.GEMINI_FALLBACK_MODELS || 'gemini-3.8-flash').split(',').map(m => m.trim());
-const MODEL_CHAIN = [PRIMARY_MODEL, ...FALLBACK_MODELS].filter((v, i, a) => a.indexOf(v) === i);
+// FORCE valid, working Google models. Ignore fake "3.5" or "3.8" names from config.
+const PRIMARY_MODEL = 'gemini-1.5-flash';
+const FALLBACK_MODELS = ['gemini-1.5-flash-8b', 'gemini-1.5-pro'];
 
-const SYSTEM_RULE = (q) => {
-  let prompt = '';
-  if (q.kind === 'multiple_choice') {
-    prompt = 'Answer the multiple-choice question. Reply with ONLY the exact text of one of the provided choices, verbatim. No explanation, no punctuation, no quotes.\n\nChoices:\n- ' + q.choices.join('\n- ');
-  } else if (q.kind === 'number' && q.fields && q.fields.length > 0) {
-    const fieldsList = q.fields.map(f => f.label || `Field ${f.ref}`).join('\n- ');
-    prompt = 'Answer the math question. Reply with ONLY a valid JSON object where the keys match the field labels and the values are the raw numeric answers (no units like cm, kg, or degrees). Example: {"Question 1": 42, "Question 2": 3.14}. No markdown, no explanation.\n\nFields:\n- ' + fieldsList;
-  } else if (q.fields && q.fields.length > 0) {
-    const fieldsList = q.fields.map(f => f.label || `Field ${f.ref}`).join('\n- ');
-    prompt = 'Answer the question. Reply with ONLY a valid JSON object where the keys match the field labels and the values are the exact text answers. No markdown, no explanation.\n\nFields:\n- ' + fieldsList;
-  } else {
-    prompt = 'Answer the question. Reply with ONLY the exact final answer. If it is a number, provide ONLY the number (no units like cm or kg). If it is a word, provide ONLY the word. No full sentences, no explanation, no punctuation.';
-  }
-  if (q.image) {
-    prompt += '\n\nCRITICAL: This question has an image. You MUST analyze the image to extract the question text and any visual data (graphs, shapes). Do not guess.';
-  }
-  return prompt;
-};
-
-async function fetchImageAsInline(imageUrl, session) {
-  try {
-    const res = await fetch(imageUrl);
-    if (!res.ok) return null;
-    const buffer = await res.arrayBuffer();
-    const base64 = Buffer.from(buffer).toString('base64');
-    const mimeType = res.headers.get('content-type') || 'image/png';
-    return { inlineData: { mimeType, data: base64 } };
-  } catch (err) {
-    warn('[gemini] Failed to fetch image: ' + err.message);
+export async function getAIanswer({ kind, prompt, choices, image, fields }, session) {
+  const apiKey = (process.env.GEMINI_API_KEY || config.geminiKey || '').trim();
+  if (!apiKey) {
+    warn('[gemini] API key is missing.');
     return null;
   }
-}
 
-async function callOnce(model, parts) {
-  const rawKey = process.env.GEMINI_API_KEY || config.geminiKey;
-  const apiKey = rawKey ? String(rawKey).trim() : null;
-  
-  if (!apiKey) throw new Error('GEMINI_API_KEY is missing or empty. Check your environment variables.');
-  
   const genAI = new GoogleGenerativeAI(apiKey);
-  const genModel = genAI.getGenerativeModel({ model });
   
-  const contents = [];
-  const textParts = [];
-  
-  for (const part of parts) {
-    if (part.inlineData) {
-      contents.push({
-        role: 'user',
-        parts: [{ inlineData: part.inlineData }]
-      });
-    } else if (part.text) {
-      textParts.push(part.text);
-    }
-  }
-  
-  if (textParts.length > 0) {
-    contents.push({ role: 'user', parts: [{ text: textParts.join('\n') }] });
-  }
-  
-  try {
-    const result = await genModel.generateContent({ contents });
-    const response = result.response;
-    return response.text();
-  } catch (err) {
-    const status = err.status || err.response?.status || 'unknown';
-    const message = err.message || 'Unknown error';
-    throw new Error(`Model '${model}' failed with status ${status}: ${message}`);
-  }
-}
-
-export async function getAIanswer(q, session, opts = {}) {
-  const parts = [{ text: SYSTEM_RULE(q) + '\n\nQuestion:\n' + q.prompt }];
-
-  if (q.image) {
-    const inline = await fetchImageAsInline(q.image, session);
-    if (inline) parts.push(inline);
+  // Build the prompt based on question type
+  let systemPrompt = 'You are a precise UK secondary-school Maths and Science tutor. ';
+  if (kind === 'multiple_choice') {
+    systemPrompt += `Answer the multiple-choice question. Reply with ONLY the exact text of one of these choices, verbatim. No explanation, no punctuation, no quotes.\nChoices:\n- ${choices.join('\n- ')}\nQuestion:\n${prompt}`;
+  } else if (kind === 'number' && fields?.length > 0) {
+    const fieldsList = fields.map(f => f.label || `Field ${f.ref}`).join('\n- ');
+    systemPrompt += `Answer the math question. Reply with ONLY a valid JSON object where the keys match the field labels and the values are the raw numeric answers (no units like cm, kg, or degrees). Example: {"Question 1": 42, "Question 2": 3.14}. No markdown, no explanation.\nFields:\n- ${fieldsList}\nQuestion:\n${prompt}`;
+  } else if (fields?.length > 0) {
+    const fieldsList = fields.map(f => f.label || `Field ${f.ref}`).join('\n- ');
+    systemPrompt += `Answer the question. Reply with ONLY a valid JSON object where the keys match the field labels and the values are the exact text answers. No markdown, no explanation.\nFields:\n- ${fieldsList}\nQuestion:\n${prompt}`;
+  } else {
+    systemPrompt += `Answer the question. Reply with ONLY the exact final answer. If it is a number, provide ONLY the number (no units). If it is a word, provide ONLY the word. No full sentences, no explanation, no punctuation.\nQuestion:\n${prompt}`;
   }
 
-  for (let i = 0; i < MODEL_CHAIN.length; i++) {
-    const m = MODEL_CHAIN[i];
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const raw = await callOnce(m, parts);
-        if (!raw || !raw.trim()) continue;
-        
-        let answer = raw.trim();
-        if (answer.startsWith('```json')) {
-          answer = answer.replace(/^```json\s*/, '').replace(/\s*```$/, '').trim();
-        } else if (answer.startsWith('```')) {
-          answer = answer.replace(/^```\s*/, '').replace(/\s*```$/, '').trim();
+  const parts = [{ text: systemPrompt }];
+  if (image) {
+    parts.push({ inlineData: { mimeType: 'image/png', data: image.toString('base64') } });
+  }
+
+  // Try primary model, then fallbacks
+  const modelsToTry = [PRIMARY_MODEL, ...FALLBACK_MODELS];
+  
+  for (const model of modelsToTry) {
+    try {
+      const genModel = genAI.getGenerativeModel({ model });
+      const result = await genModel.generateContent({
+        contents: [{ role: 'user', parts }],
+        generationConfig: {
+          temperature: 0.0,
+          maxOutputTokens: 500,
         }
-        
-        return { answer, model: m };
-      } catch (err) {
-        warn(`[gemini] ${err.message}`);
+      });
+      
+      const rawText = result.response.text().trim();
+      if (!rawText) continue;
+
+      // Clean up markdown code blocks if Gemini adds them
+      let answer = rawText;
+      if (answer.startsWith('```json')) {
+        answer = answer.replace(/^```json\s*/, '').replace(/\s*```$/, '').trim();
+      } else if (answer.startsWith('```')) {
+        answer = answer.replace(/^```\s*/, '').replace(/\s*```$/, '').trim();
+      }
+
+      log(`[gemini] Successfully answered using ${model}`);
+      return { answer, model };
+    } catch (err) {
+      const status = err.status || err.response?.status || 'unknown';
+      const message = err.message || 'Unknown error';
+      warn(`[gemini] Model '${model}' failed with status ${status}: ${message}`);
+      
+      // If it's a 404, the model name is invalid. Skip to next.
+      // If it's a 429, we've hit rate limits. Break entirely to prevent account ban.
+      if (status === 429) {
+        warn('[gemini] Rate limit (429) reached. Stopping AI requests to protect API key.');
+        break;
       }
     }
   }
 
-  warn('[gemini] ALL models failed.');
-  return { answer: null, model: null };
+  warn('[gemini] ALL models failed. Returning null.');
+  return null;
 }
