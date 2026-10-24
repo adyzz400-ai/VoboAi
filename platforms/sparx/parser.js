@@ -178,12 +178,25 @@ export function parseSparxQuestion(buffer) {
     if (node.element === 'text') { promptParts.push(node.text); return; }
     if (node.element === 'image' || node.element === 'img') { if (node.src) imageUrl = node.src; return; }
     if (node.element === 'card' || node.element === 'choice') {
-      choices.push({ ref: node.ref || 'choice', text: (node.content && node.content[0] && node.content[0].text) || '' });
+      // FIX: Ensure ref is never undefined to prevent "invalid name" gRPC errors
+      choices.push({ ref: node.ref || `choice_${choices.length}`, text: (node.content && node.content[0] && node.content[0].text) || '' });
       return;
     }
-    if (node.element === 'slot') { slots.push({ ref: node.ref || 'slot', accept: node.accept }); promptParts.push('___'); return; }
-    if (node.element === 'number-field') { numberFields.push({ ref: node.ref || 'number', label: prevText }); promptParts.push('___'); return; }
-    if (node.element === 'text-field') { textFields.push({ ref: node.ref || 'text' }); promptParts.push('___'); return; }
+    if (node.element === 'slot') { 
+      slots.push({ ref: node.ref || `slot_${slots.length}`, accept: node.accept }); 
+      promptParts.push('___'); 
+      return; 
+    }
+    if (node.element === 'number-field') { 
+      numberFields.push({ ref: node.ref || `number_${numberFields.length}`, label: prevText }); 
+      promptParts.push('___'); 
+      return; 
+    }
+    if (node.element === 'text-field') { 
+      textFields.push({ ref: node.ref || `text_${textFields.length}` }); 
+      promptParts.push('___'); 
+      return; 
+    }
     if (node.content) {
       let lastText = prevText;
       for (const child of node.content) { walk(child, lastText); if (child.element === 'text') lastText = child.text; }
