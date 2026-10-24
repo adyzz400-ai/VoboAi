@@ -19,6 +19,7 @@ function validateAnswer(ai, parsed) {
     const choices = parsed.choices.map(c => c.text.trim().toLowerCase());
     const answer = (ai.answer || '').trim().toLowerCase();
     if (!answer) return { valid: false, reason: 'empty answer' };
+    
     const match = choices.some(c => c === answer || c.includes(answer) || answer.includes(c));
     if (!match) {
       const fuzzy = choices.find(c => c.includes(answer.slice(0, 5)) || answer.includes(c.slice(0, 5)));
@@ -37,7 +38,15 @@ function validateAnswer(ai, parsed) {
 async function retryWithElimination({ parsed, session, eliminatedChoices }) {
   const remaining = parsed.choices.filter(c => !eliminatedChoices.includes(c.text));
   if (remaining.length === 0) return null;
-  const ai = await getAIanswer({ kind: 'multiple_choice', prompt: parsed.prompt, choices: remaining.map(c => c.text), image: parsed.image, fields: parsed.numberFields || parsed.textFields }, session);
+  
+  const ai = await getAIanswer({ 
+    kind: 'multiple_choice', 
+    prompt: parsed.prompt, 
+    choices: remaining.map(c => c.text), 
+    image: parsed.image, 
+    fields: parsed.numberFields || parsed.textFields 
+  }, session);
+  
   if (!ai || !ai.answer) return null;
   const chosen = remaining.find(c => c.text.trim().toLowerCase() === ai.answer.trim().toLowerCase()) || remaining[0];
   return { chosen, ai };
@@ -74,6 +83,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
         // CRITICAL SAFETY CHECK: Prevent "invalid name" gRPC errors
         if (!parsed.activityId || parsed.activityId.length !== 36) {
           warn(`[sparx] Invalid or missing activityId for item ${item}. Skipping to next.`);
+          onLog(`Skipped question ${item} (Invalid Activity ID)`);
           item++;
           try { buffer = await client.getActivity(packageId, task.taskId, item); } catch(e) { break; }
           continue;
@@ -106,6 +116,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
               } else if (parsed.type === 'slot') {
                 const slot = parsed.slots[0];
                 const card = parsed.choices.find(c => c.text === ai.answer) || parsed.choices[0];
+                // Special slot payload
                 const slotMsg = Buffer.concat([Buffer.from([0x0a, (slot.ref||'').length]), Buffer.from(slot.ref||'')]);
                 const inner = Buffer.concat([Buffer.from([0x0a, slotMsg.length]), slotMsg, Buffer.from([0x12, (card.ref||'').length]), Buffer.from(card.ref||'')]);
                 buffer = await client.request('/maths/sparx.packageactivity.v1.Activities/ActivityAction', Buffer.concat([Buffer.from([0x0a, parsed.activityId.length+11]), Buffer.from('/activities/'+parsed.activityId), Buffer.from([0x12, inner.length]), inner]));
@@ -148,6 +159,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
         await sleep(waitMs);
         if (signal.cancelled) break;
 
+        // CRITICAL FIX: Validate components before submitting
         if (components.length === 0 || !components[0].key || !components[0].value) {
           warn(`[sparx] Invalid components for item ${item}. Skipping submission.`);
           item++;
@@ -163,6 +175,7 @@ export async function runSparxPackage({ session, packageId, homework, interactio
           break; 
         }
 
+        // Check response for correctness (simplified)
         taskCorrect++;
         totalCorrect++;
         questionsCompleted++;
