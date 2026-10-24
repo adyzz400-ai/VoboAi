@@ -3,9 +3,10 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { log, warn } from '../../utils/logger.js';
 import { config } from '../../utils/config.js';
 
-// Force a clean, valid model chain. Strip any accidental whitespace.
-const PRIMARY_MODEL = (process.env.GEMINI_DEFAULT_MODEL || config.geminiDefault || 'gemini-1.5-flash').trim();
-const MODEL_CHAIN = [PRIMARY_MODEL, 'gemini-1.5-flash', 'gemini-1.0-pro'].filter((v, i, a) => a.indexOf(v) === i);
+// Match the working Python bot's model chain
+const PRIMARY_MODEL = (process.env.GEMINI_DEFAULT_MODEL || config.geminiDefault || 'gemini-3.5-flash-lite').trim();
+const FALLBACK_MODELS = (process.env.GEMINI_FALLBACK_MODELS || 'gemini-3.8-flash').split(',').map(m => m.trim());
+const MODEL_CHAIN = [PRIMARY_MODEL, ...FALLBACK_MODELS].filter((v, i, a) => a.indexOf(v) === i);
 
 const SYSTEM_RULE = (q) => {
   let prompt = '';
@@ -41,7 +42,6 @@ async function fetchImageAsInline(imageUrl, session) {
 }
 
 async function callOnce(model, parts) {
-  // Strip whitespace from API key to prevent authentication failures
   const rawKey = process.env.GEMINI_API_KEY || config.geminiKey;
   const apiKey = rawKey ? String(rawKey).trim() : null;
   
@@ -73,7 +73,6 @@ async function callOnce(model, parts) {
     const response = result.response;
     return response.text();
   } catch (err) {
-    // Log the EXACT error from Google to see if it's 404, 401, 403, etc.
     const status = err.status || err.response?.status || 'unknown';
     const message = err.message || 'Unknown error';
     throw new Error(`Model '${model}' failed with status ${status}: ${message}`);
