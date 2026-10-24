@@ -86,67 +86,46 @@ export function extractTasksFromBytes(pkgBytes) {
   const seen = new Set();
 
   function processMessage(buf, start, end) {
-    let hasPath = false;
-    let id = null;
-    let pathType = 'unknown';
+    let hasTaskPath = false;
+    let taskId = null;
 
-    // Look for BOTH activities/ and tasks/ paths
     for (const f of fields(buf, start, end)) {
       if (f.wt === 2) {
         const val = str(buf, f);
-        const actMatch = val.match(/activities\/([0-9a-f-]+)/i);
-        const taskMatch = val.match(/tasks\/([0-9a-f-]+)/i);
-        
-        if (actMatch) {
-          hasPath = true;
-          id = actMatch[1].toLowerCase();
-          pathType = 'activity';
-          break; // Prefer activity ID if found
-        } else if (taskMatch) {
-          hasPath = true;
-          id = taskMatch[1].toLowerCase();
-          pathType = 'task';
+        // STRICT UUID MATCH: Prevents matching truncated IDs like "tasks/0da454b8-...-361"
+        const tMatch = val.match(/tasks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+        if (tMatch) {
+          hasTaskPath = true;
+          taskId = tMatch[1].toLowerCase();
           break;
         }
       }
     }
 
-    if (hasPath && id && !seen.has(id)) {
-      seen.add(id);
+    if (hasTaskPath && taskId && !seen.has(taskId)) {
+      seen.add(taskId);
       let title = 'Task';
       let total = 10, done = 0;
-      let bestTitleLength = 0;
 
       for (const f of fields(buf, start, end)) {
-        if (f.tag === 2 && f.wt === 2) {
-          const t = str(buf, f).trim();
-          // Prefer longer, more descriptive titles over generic "Task" or "Homework"
-          if (t.length > bestTitleLength && t.length > 4) {
-            const lower = t.toLowerCase();
-            if (!['task', 'homework', 'practice', 'revision'].includes(lower)) {
-              title = t;
-              bestTitleLength = t.length;
+        if (f.tag === 2 && f.wt === 2) title = str(buf, f).trim();
+        else if (f.tag === 6 && f.wt === 0) total = Number(readVarint(buf, f.payloadStart).value) || 10;
+        else if (f.tag === 7 && f.wt === 0) done = Number(readVarint(buf, f.payloadStart).value) || 0;
+      }
+
+      if (title === 'Task' || title.length < 5) {
+        for (const f of fields(buf, start, end)) {
+          if (f.wt === 2) {
+            const val = str(buf, f);
+            if (val.length > 5 && (val.startsWith('Task') || val.startsWith('Flashcards') || val.startsWith('Times Tables') || val.includes('Question') || val.includes('Practice'))) {
+              title = val; break;
             }
           }
-        } else if (f.tag === 6 && f.wt === 0) {
-          total = Number(readVarint(buf, f.payloadStart).value) || 10;
-        } else if (f.tag === 7 && f.wt === 0) {
-          done = Number(readVarint(buf, f.payloadStart).value) || 0;
         }
       }
 
-      // Fallback title cleanup
-      if (bestTitleLength === 0 || title.toLowerCase() === 'task' || title.toLowerCase() === 'homework') {
-        title = `Task ${tasks.length + 1}`;
-      }
-
-      console.log(`[sparx-debug-task] Found ${pathType} ID: ${id} | Title: "${title}" | Total: ${total} | Done: ${done}`);
-
       tasks.push({
-        taskId: id,
-        title,
-        total,
-        done,
+        taskId, title, total, done,
         isFlashcards: /flash\s*cards?/i.test(title),
         isTimesTables: /times\s*tables/i.test(title),
         hasBookworkCheck: !/flash\s*cards?/i.test(title) && !/times\s*tables/i.test(title),
@@ -160,7 +139,6 @@ export function extractTasksFromBytes(pkgBytes) {
   }
 
   processMessage(pkgBytes, 0, pkgBytes.length);
-  console.log(`[sparx-debug-task] Total tasks extracted: ${tasks.length}`);
   return tasks;
 }
 
@@ -180,7 +158,8 @@ export function parseSparxQuestion(buffer) {
   const parsed = JSON.parse(s.slice(start, jEnd));
   const layout = Array.isArray(parsed) ? parsed[0] : parsed;
   
-  const actMatch = s.match(/\/activities\/([0-9a-f-]+)/i);
+  // STRICT UUID MATCH for activityId as well
+  const actMatch = s.match(/\/activities\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
   const activityId = actMatch ? actMatch[1] : null;
   const root = layout.layout || layout;
 
