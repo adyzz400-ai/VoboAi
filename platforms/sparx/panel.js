@@ -13,8 +13,10 @@ export function buildPanel({ interaction }) {
 
   const components = [];
 
+  // FIX: Check 'tasks' instead of 'homeworks' to match handlers.js
   if (session?.tasks && session.tasks.length > 0) {
     const hwSelect = new StringSelectMenuBuilder()
+      // FIX: Use 'sparx:task' to match the handler in handlers.js
       .setCustomId('sparx:task')
       .setPlaceholder('Select homework...')
       .addOptions(session.tasks.map(hw => ({
@@ -25,6 +27,7 @@ export function buildPanel({ interaction }) {
 
     components.push(new ActionRowBuilder().addComponents(hwSelect));
 
+    // FIX: Check 'selectedTaskId' instead of 'selectedHomework'
     if (session.selectedTaskId) {
       const selected = session.tasks.find(h => h.packageId === session.selectedTaskId);
       if (selected) {
