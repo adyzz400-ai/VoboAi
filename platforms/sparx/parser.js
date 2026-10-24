@@ -92,7 +92,7 @@ export function extractTasksFromBytes(pkgBytes) {
     for (const f of fields(buf, start, end)) {
       if (f.wt === 2) {
         const val = str(buf, f);
-        // STRICT UUID MATCH: Prevents matching truncated IDs like "tasks/0da454b8-...-361"
+        // STRICT FIX: Only match exact 36-character UUIDs to prevent truncated IDs
         const tMatch = val.match(/tasks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
         if (tMatch) {
           hasTaskPath = true;
@@ -158,7 +158,7 @@ export function parseSparxQuestion(buffer) {
   const parsed = JSON.parse(s.slice(start, jEnd));
   const layout = Array.isArray(parsed) ? parsed[0] : parsed;
   
-  // STRICT UUID MATCH for activityId as well
+  // STRICT FIX: Only match exact 36-character UUIDs for activityId
   const actMatch = s.match(/\/activities\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
   const activityId = actMatch ? actMatch[1] : null;
   const root = layout.layout || layout;
@@ -178,12 +178,12 @@ export function parseSparxQuestion(buffer) {
     if (node.element === 'text') { promptParts.push(node.text); return; }
     if (node.element === 'image' || node.element === 'img') { if (node.src) imageUrl = node.src; return; }
     if (node.element === 'card' || node.element === 'choice') {
-      choices.push({ ref: node.ref, text: (node.content && node.content[0] && node.content[0].text) || '' });
+      choices.push({ ref: node.ref || 'choice', text: (node.content && node.content[0] && node.content[0].text) || '' });
       return;
     }
-    if (node.element === 'slot') { slots.push({ ref: node.ref, accept: node.accept }); promptParts.push('___'); return; }
-    if (node.element === 'number-field') { numberFields.push({ ref: node.ref, label: prevText }); promptParts.push('___'); return; }
-    if (node.element === 'text-field') { textFields.push({ ref: node.ref }); promptParts.push('___'); return; }
+    if (node.element === 'slot') { slots.push({ ref: node.ref || 'slot', accept: node.accept }); promptParts.push('___'); return; }
+    if (node.element === 'number-field') { numberFields.push({ ref: node.ref || 'number', label: prevText }); promptParts.push('___'); return; }
+    if (node.element === 'text-field') { textFields.push({ ref: node.ref || 'text' }); promptParts.push('___'); return; }
     if (node.content) {
       let lastText = prevText;
       for (const child of node.content) { walk(child, lastText); if (child.element === 'text') lastText = child.text; }
