@@ -166,6 +166,9 @@ export function parseSparxQuestion(buffer) {
   const imgMatch = s.match(/"src"\s*:\s*"([^"]+)"/);
   if (imgMatch) imageUrl = imgMatch[1];
 
+  let choiceIndex = 0;
+  let fieldIndex = 0;
+
   function walk(node, prevText = '') {
     if (!node || typeof node !== 'object') return;
     if (Array.isArray(node)) {
@@ -176,18 +179,42 @@ export function parseSparxQuestion(buffer) {
     if (node.element === 'text') { promptParts.push(node.text); return; }
     if (node.element === 'image' || node.element === 'img') { if (node.src) imageUrl = node.src; return; }
     if (node.element === 'card' || node.element === 'choice') {
-      choices.push({ ref: node.ref, text: (node.content && node.content[0] && node.content[0].text) || '' });
+      // FIX: Ensure ref is valid, generate one if missing
+      const ref = node.ref || `choice_${choiceIndex++}`;
+      choices.push({ 
+        ref: ref, 
+        text: (node.content && node.content[0] && node.content[0].text) || '' 
+      });
       return;
     }
-    if (node.element === 'slot') { slots.push({ ref: node.ref, accept: node.accept }); promptParts.push('___'); return; }
-    if (node.element === 'number-field') { numberFields.push({ ref: node.ref, label: prevText }); promptParts.push('___'); return; }
-    if (node.element === 'text-field') { textFields.push({ ref: node.ref }); promptParts.push('___'); return; }
+    if (node.element === 'slot') { 
+      // FIX: Ensure ref is valid
+      const ref = node.ref || `slot_${fieldIndex++}`;
+      slots.push({ ref: ref, accept: node.accept }); 
+      promptParts.push('___'); 
+      return; 
+    }
+    if (node.element === 'number-field') { 
+      // FIX: Ensure ref is valid and extract label properly
+      const ref = node.ref || `number_${fieldIndex++}`;
+      numberFields.push({ ref: ref, label: prevText || node.label || `Field ${fieldIndex}` }); 
+      promptParts.push('___'); 
+      return; 
+    }
+    if (node.element === 'text-field') { 
+      // FIX: Ensure ref is valid
+      const ref = node.ref || `text_${fieldIndex++}`;
+      textFields.push({ ref: ref }); 
+      promptParts.push('___'); 
+      return; 
+    }
     if (node.content) {
       let lastText = prevText;
       for (const child of node.content) { walk(child, lastText); if (child.element === 'text') lastText = child.text; }
     }
   }
   walk(root);
+  
   const prompt = promptParts.join(' ').replace(/\s+/g, ' ').trim();
   if (numberFields.length > 0) return { prompt, choices: [], numberFields, image: imageUrl, activityId, type: 'number' };
   if (textFields.length > 0) return { prompt, choices: [], textFields, image: imageUrl, activityId, type: 'text' };
@@ -234,44 +261,27 @@ export function parseHomeworkList(buffer) {
 }
 
 export function parseGetPackage(buffer) {
-  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) {
-    console.log('[sparx-debug-getpackage] FAILED: buffer is empty or not a buffer');
-    return null;
-  }
+  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length === 0) return null;
   const raw = unframe(buffer);
   const top = byTag(raw, 0, raw.length);
 
   const f = (top.get(1) || [])[0];
-  if (!f) {
-    console.log('[sparx-debug-getpackage] FAILED: missing field 1');
-    return null;
-  }
+  if (!f) return null;
   const pkgBytes = sub(raw, f);
   const pm = byTag(pkgBytes, 0, pkgBytes.length);
 
   const pathF = (pm.get(1) || [])[0];
-  if (!pathF) {
-    console.log('[sparx-debug-getpackage] FAILED: missing path field');
-    return null;
-  }
-  
-  const pathStr = str(pkgBytes, pathF);
-  const pkgMatch = pathStr.match(/packages\/([0-9a-f-]+)/i);
-  if (!pkgMatch) {
-    console.log('[sparx-debug-getpackage] FAILED: path did not match regex. Path was:', pathStr);
-    return null;
-  }
+  if (!pathF) return null;
+  const pkgMatch = str(pkgBytes, pathF).match(/packages\/([0-9a-f-]+)/i);
+  if (!pkgMatch) return null;
   const packageId = pkgMatch[1].toLowerCase();
 
   let title = 'Homework';
   const titleF = (pm.get(2) || [])[0];
   if (titleF) {
     const t = str(pkgBytes, titleF).trim();
-    console.log(`[sparx-debug-getpackage] SUCCESS: Raw title string for ${packageId}:`, t);
     const match = t.match(/^(.+?)\s+due\s+(.+)$/i);
     if (match) title = match[1].trim(); else title = t;
-  } else {
-    console.log(`[sparx-debug-getpackage] WARNING: missing field 2 (title) for ${packageId}. Available tags:`, Array.from(pm.keys()));
   }
 
   let dueDate = null;
